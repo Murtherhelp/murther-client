@@ -3225,9 +3225,13 @@ else if (typeof define === 'function' && define['amd'])
     var READY = false, MOD = null, F = {};
     var CELL_SZ = 24; // sizeof(Cell): u32 id, u32 owner, f32 x, f32 y, f32 r, u8 me + 3 pad
     var cellPtr = 0, cellCap = 0, outPtr = 0;
-    var armedAt = 0, lastArmedKey = 0, noBinLogged = false;
+    var armedAt = 0, lastArmedKey = 0, lastEndAt = 0, noBinLogged = false;
+    /* Fix round 1: REARM_COOLDOWN_MS. Expiry used to re-arm on the very next
+     * 100 ms pump while a lock lived, holding tick-reversal ~permanently and
+     * freezing the cell. Auto-arm now waits this long after any window end. */
     var opSeen = {};
     var THRESH_ARKEY = { '4x': 2, '8x': 3, '16x': 4, '64x': 5 };
+    var REARM_COOLDOWN_MS = 1500;
     /* Return fanout map. 32 is unreachable (no 32x initiator exists; Penta is
      * dispatch-only per the panels) and stays only as a defensive entry: a
      * 32-confirmation implies at-least-Penta, so overshoot to the Hexa fanout
@@ -3239,8 +3243,12 @@ else if (typeof define === 'function' && define['amd'])
     /* Step 5 completion: brain transitions go to Betix (record) as well as the
      * console path. Failure-silent by construction (see MX_BETIX). */
     function betix(level, msg, data) { try { MX_BETIX.log(level, msg, data); } catch (e) {} }
+    /* Fix round 1: names hash case/whitespace-insensitively. Lock names (radius
+     * rule, cursor pick) and foe labels come from different readers; without
+     * this the core can watch an owner id no foe group ever hashes to, arming
+     * forever and never confirming. */
     function hashName(s) {
-      s = String(s || '');
+      s = String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
       var h = 2166136261;
       for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
       return h >>> 0;
@@ -3335,11 +3343,12 @@ else if (typeof define === 'function' && define['amd'])
         var armed = false;
         try { armed = F.is_armed() === 1; } catch (eA) { armed = false; }
         var now = Date.now();
-        if (!armed && S.otorev.autoTriggerEnabled && snap.lockName) {
+        if (!armed && S.otorev.autoTriggerEnabled && snap.lockName && (now - lastEndAt) > REARM_COOLDOWN_MS) {
           var key = THRESH_ARKEY[S.otorev.autoTriggerThreshold] || 2;
           try {
             if (F.arm(hashName(snap.lockName) || 2, key) === 1) {
               armedAt = now; lastArmedKey = key; armed = true;
+              diag('auto-reverse core: armed (auto) on "' + snap.lockName + '" x' + key);
               betix('INFO', 'brain armed (auto)', { lock: snap.lockName, arKey: key });
             }
           } catch (eArm) { betix('ERROR', 'brain auto-arm failed', { err: String((eArm && eArm.message) || eArm) }); }
@@ -3348,7 +3357,8 @@ else if (typeof define === 'function' && define['amd'])
         //    watched enemy that never splits cannot hold the reverse forever.
         if (armed && armedAt && (now - armedAt) > (S.otorev.reverseWindowMs || 380)) {
           try { F.disarm(); } catch (eD) {}
-          armed = false; armedAt = 0;
+          armed = false; armedAt = 0; lastEndAt = now;
+          diag('auto-reverse core: window expired, disarmed');
         }
         // 4. Poll the core; on confirmation aim at the biggest piece and fan out.
         var out = new DataView(MOD.HEAPU8.buffer, outPtr, 12);
@@ -3359,6 +3369,7 @@ else if (typeof define === 'function' && define['amd'])
           var tx = out.getFloat32(0, true), ty = out.getFloat32(4, true), tc = out.getUint8(8);
           var mode = COUNT_MODE[tc] || '4x';
           betix('INFO', 'brain confirmed', { count: tc, mode: mode, x: Math.round(tx), y: Math.round(ty) });
+          diag('auto-reverse core: CONFIRMED x' + tc + ' -> returning ' + mode);
           try {
             m.state.lock = { x: tx, y: ty, m: 0, at: now, src: 'wasm' };
             m.state.lockName = snap.lockName || '';
@@ -3368,7 +3379,7 @@ else if (typeof define === 'function' && define['amd'])
           m.state.reverseMode = firedMode;
           try { m.fireTrigger('wasm auto-trigger x' + tc, { aim: false }); } catch (eT) { betix('ERROR', 'brain return fanout failed', { count: tc }); }
           m.state.reverseMode = prev;
-          armedAt = 0;
+          armedAt = 0; lastEndAt = now;
           betix('INFO', 'brain returned', { mode: firedMode });
         }
       } catch (e) {}
@@ -3398,6 +3409,7 @@ else if (typeof define === 'function' && define['amd'])
         if (!key) return false;
         if (F.arm(hashName(snap.lockName) || 2, key) === 1) {
           armedAt = Date.now(); lastArmedKey = key;
+          diag('auto-reverse core: armed (bind ' + mode + ') on "' + snap.lockName + '"');
           betix('INFO', 'brain armed (bind)', { lock: snap.lockName, mode: mode, arKey: key });
           return true;
         }
