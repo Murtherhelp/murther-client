@@ -17,6 +17,7 @@ fi
 
 if [ "$MODE" = "wasm" ] || [ "$MODE" = "all" ]; then
   echo "[BUILD] emcc -O3 single-file, no pthreads, no exceptions crossing boundary"
+  # NOTE: no -s PTHREADS flag: emcc >= 3.1.59 rejects it as internal (off by default).
   emcc core.cpp -O3 \
     -std=c++17 \
     -s WASM=1 \
@@ -28,7 +29,6 @@ if [ "$MODE" = "wasm" ] || [ "$MODE" = "all" ]; then
     -s EXPORT_NAME=AutoReverseCore \
     -s DISABLE_EXCEPTION_CATCHING=1 \
     -s SUPPORT_LONGJMP=0 \
-    -s PTHREADS=0 \
     -s EXPORTED_FUNCTIONS="['_init_engine','_arm','_disarm','_is_armed','_push_cells','_pop_action','_malloc','_free']" \
     -s EXPORTED_RUNTIME_METHODS="['cwrap']" \
     -o fisen_core.js
