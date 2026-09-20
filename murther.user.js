@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Murther — gota.io client
 // @namespace    murther.gota
-// @version      1.74.9
+// @version      1.74.10
 // @description  Murther - a full UI/UX replacement client for play.gota.io: a dark purple theme and a HUD reskin that HOSTS the live native panels (stats ID/Mass/Score/Cells top-centre, FPS/ping/server above the chat, leaderboard top-right, minimap, party, chat) so everything stays synced with the game; a native-synced server list with a verified pick -> join handshake; a clean name/mass leaderboard with an animated border that highlights your own row; searchable settings, themes and a full backup; client hotkeys with live write-through rebinding, chat macros and game-side action keys; and real performance controls (FPS cap / vsync governor, renderer resolution, reduce effects). A self-healing HUD keeps it honest: a state that would leave every panel hidden is reset once, with a toast, instead of blanking the screen. Feature rows explain themselves behind their own arrow (click it) instead of on hover - a category header is the only hover description left; the number on a category header is the real count of rows it is showing; Themes opens with Enable Custom Theme, which switches the client's whole custom look off and says so; Play and Spectate wear an animated white outline; and the profile card's particle field is fitted to the real device pixels, reacts to the pointer and demotes itself when frames get slow.
 // @description  Every release note and the full behavioural history live in the RELEASE HISTORY block below the header - the metadata above carries only the current feature set, so it can never go stale or outgrow a userscript manager's UI.
 // @author       Murther
@@ -804,6 +804,27 @@
 // hovering the bar pops a glow + brightness lift. Same palette, CSS-only,
 // still static under reduce-motion.
 //
+//
+// v1.74.10: switching region (EUROPE / NORTH AMERICA pill, or the cycle-region
+// hotkey) can no longer end in an EU pill over NA rows with no explanation.
+// The pill click used to declare victory on dispatch: it lit the pill first,
+// forwarded through a bare .click() that no other forward still uses, and read
+// the game's active tab through a node registry populated once at boot - so
+// when the game did not take the switch (or rebuilt its tab nodes) the mirror
+// kept the old region's rows forever. Now the forward goes through the
+// realistic pointer sequence, the tab container is resolved fresh on every
+// read (refreshing the registry), and the switch is VERIFIED against the
+// game's own active tab plus the row data as a second witness: a refusal
+// retries once, puts the pill back on the region the game actually stayed on,
+// and toasts why. While a switch is unconfirmed the list says 'Waiting for
+// EUROPE servers - ...' instead of the wrong region's rows (a snapshot of the
+// pre-switch row signatures tells a mid-swap table from fresh data, so shared
+// server names across regions cannot fake it), and the follow-the-game
+// adoption needs the same native key on two consecutive ticks with a 5s
+// blackout after a pill click, so one mid-swap read can never yank the pill.
+// Genuine refreshes (regions agree, list empty) still keep the old rows, and
+// __murther.serverCheck() now reports pill vs native region, per-tab keys and
+// fresh-vs-cached container identity, so one paste answers 'why' next time.
 // Step 5 (unreleased): Auto Reverse grows a deterministic WASM brain
 // (MX_AUTOREVERSE_CORE, built from the Step 2-4 C++ core). Press = arm when
 // the brain is live and a target is locked (autoReverseBindPress), stock
@@ -9651,29 +9672,66 @@ function applyChatResize() {
   var HIDDEN_REGIONS = ['ap'];
   var REGION_LABELS = { eu: 'EUROPE', na: 'NORTH AMERICA', ap: 'ASIA PACIFIC' };
   function nativeRegionKey(tab) {
-    // Derive the region key from the tab itself (its data-region attr or text),
-    // normalized to canonical keys so scope lookups and comparisons are stable.
-    var t = (tab.getAttribute('data-region') || tab.textContent || '').trim().toLowerCase();
-    if (/^eu(|$)|europe/.test(t)) return 'eu';
-    if (/^na(|$)|north|america/.test(t)) return 'na';
-    if (/^ap(|$)|asia|pacific/.test(t)) return 'ap';
-    return t || ('tab' + regionOrder.length);
+    // A data-region the game already ships (eu/na/ap) is used verbatim, so a
+    // label the client has never seen cannot be normalised into a clash; the
+    // visible text is matched by explicit rules (exact code, known word,
+    // code-plus-separator) rather than one loose alternation.
+    var raw = (tab && tab.getAttribute) ? String(tab.getAttribute('data-region') || '').trim().toLowerCase() : '';
+    if (raw === 'eu' || raw === 'na' || raw === 'ap') return raw;
+    var t = String((tab && tab.textContent) || '').trim().toLowerCase() || raw;
+    if (!t) return 'tab' + regionOrder.length;
+    if (t === 'eu' || t.indexOf('europe') !== -1 || /^eu[\s\-_]/.test(t)) return 'eu';
+    if (t === 'na' || t.indexOf('north') !== -1 || t.indexOf('america') !== -1 || /^na[\s\-_]/.test(t)) return 'na';
+    if (t === 'ap' || t.indexOf('asia') !== -1 || t.indexOf('pacific') !== -1 || /^ap[\s\-_]/.test(t)) return 'ap';
+    return t;
   }
   function regionVisible(k) { return HIDDEN_REGIONS.indexOf(k) === -1; }
 
+  // The game rebuilds its menu nodes at any time, so the tab container is
+  // always resolved fresh: N['server-tab-container'] is only a fallback for a
+  // menu that has not rendered yet, and it is refreshed whenever live nodes
+  // exist (a stale cache here is what let a region switch silently stick).
+  function nativeTabContainer() {
+    var live = DOC.getElementById('server-tab-container') || null;
+    if (live) {
+      if (N['server-tab-container'] !== live) {
+        N['server-tab-container'] = live;
+        try { N.serverTabs = $all('.server-tab', live); } catch (eST) {}
+      }
+      return live;
+    }
+    return N['server-tab-container'] || null;
+  }
+  function nativeTabs() {
+    var c = nativeTabContainer();
+    var tabs = c ? $all('.server-tab', c) : [];
+    if (!tabs.length) tabs = $all('#server-tab-container .server-tab');
+    if (!tabs.length && N.serverTabs && N.serverTabs.length) {
+      tabs = N.serverTabs.filter(function (t) { return t && t.isConnected !== false; });
+    }
+    return tabs;
+  }
+  function nativeActiveTab() {
+    var c = nativeTabContainer();
+    var act = c ? $('.server-tab-active', c) : null;
+    if (act && act.isConnected !== false) return act;
+    var docAct = $('.server-tab.server-tab-active') || $('#server-tab-container .server-tab-active');
+    return (docAct && docAct.isConnected !== false) ? docAct : null;
+  }
+
   function discoverRegions() {
-    var tabs = $all('#server-tab-container .server-tab');
-    if (!tabs.length) tabs = N.serverTabs || [];
+    var tabs = nativeTabs();
     var keys = [];
     tabs.forEach(function (t) {
+      if (!t || t.isConnected === false) return;
       var k = nativeRegionKey(t);
-      t.setAttribute('data-mx-region', k);
+      try { t.setAttribute('data-mx-region', k); } catch (eMX) {}
       if (keys.indexOf(k) === -1 && regionVisible(k)) keys.push(k);
     });
     if (keys.length) regionOrder = keys;
     if (currentRegion === null || regionOrder.indexOf(currentRegion) === -1) {
       // keep whatever the game has selected, else first visible region
-      var act = $('.server-tab-active', N['server-tab-container']) || $('.chat-active-tab');
+      var act = nativeActiveTab() || $('.chat-active-tab');
       var actKey = act ? nativeRegionKey(act) : null;
       currentRegion = (actKey && regionOrder.indexOf(actKey) !== -1) ? actKey : (regionOrder[0] || 'eu');
     }
@@ -9725,27 +9783,84 @@ function applyChatResize() {
       txt(b, REGION_LABELS[r] || r.toUpperCase());
       UI.regionBtns[r] = b;
       on(b, 'click', function () {
+        if (r === currentRegion) { verifyNativeRegion(r); return; }
+        snapshotRegionRows();
         currentRegion = r;
         Object.keys(UI.regionBtns).forEach(function (k) {
           UI.regionBtns[k].classList.toggle('active', k === r);
         });
         lastPillClickAt = Date.now();
+        lastNatKeySeen = null;
         activateNativeRegion(r);
+        verifyNativeRegion(r);
         [120, 450, 900, 1500].forEach(function (d) { setTimeout(syncServerRows, d); });
       });
     });
   }
 
   function activateNativeRegion(r) {
-    // Click the native tab that carries this exact region key.
-    var tabs = $all('#server-tab-container .server-tab');
+    // Forward through the realistic pointer sequence every other native
+    // forward uses: the tab lives in the ghosted off-screen #main, where a
+    // bare .click() is an input path the game's handler may not listen to.
+    var tabs = nativeTabs();
     for (var i = 0; i < tabs.length; i++) {
-      if ((tabs[i].getAttribute('data-mx-region') || nativeRegionKey(tabs[i])) === r) {
-        try { tabs[i].click(); } catch (e) {}
-        return true;
+      var t = tabs[i];
+      if (!t || t.isConnected === false) continue;
+      var k = null;
+      try { k = t.getAttribute('data-mx-region') || nativeRegionKey(t); } catch (eK) { k = nativeRegionKey(t); }
+      if (k === r) {
+        var ok = false;
+        try { ok = nativeClick(t); } catch (eNC) { ok = false; }
+        if (!ok) { try { t.click(); ok = true; } catch (eC) { ok = false; } }
+        return ok;
       }
     }
     return false;
+  }
+
+  // Verify-after-click: the pill must never claim a region the game did not
+  // take. Polls the game's own active tab (and the row data as a second
+  // witness); on success the rows follow on the normal ticks, on failure one
+  // full-sequence retry fires and the refusal is said out loud - with the pill
+  // put back - instead of leaving an EU pill over NA rows.
+  var regionVerifyTimer = 0;
+  function verifyNativeRegion(r) {
+    if (!r || regionOrder.indexOf(r) === -1) return;
+    if (regionVerifyTimer) { try { clearTimeout(regionVerifyTimer); } catch (eCT) {} regionVerifyTimer = 0; }
+    var waited = 0;
+    function pass() {
+      regionVerifyTimer = 0;
+      var key = null;
+      try { var act = nativeActiveTab(); key = act ? nativeRegionKey(act) : null; } catch (eA) { key = null; }
+      var rowsLive = false;
+      try {
+        var curSigs = UI.srvBody ? $all('.mx-srv-row', UI.srvBody).map(function (x) { return x.getAttribute('data-sig') || ''; }) : [];
+        var snap = regionSwitchFrom;
+        rowsLive = curSigs.length > 0 && (!snap || snap.region === r || snap.sigs.join(String.fromCharCode(1)) !== curSigs.join(String.fromCharCode(1)));
+      } catch (eRL) { rowsLive = false; }
+      if (key === r || rowsLive) return;               // the game took it - the ticks take it from here
+      if (waited >= 2000) {
+        var retried = activateNativeRegion(r);         // one retry before calling it a refusal
+        setTimeout(function () {
+          var key2 = null;
+          try { var act2 = nativeActiveTab(); key2 = act2 ? nativeRegionKey(act2) : null; } catch (eA2) { key2 = null; }
+          if (key2 === r) return;
+          if (key2 && regionOrder.indexOf(key2) !== -1) {
+            currentRegion = key2;
+            lastNatKeySeen = null;
+            try { renderRegionPills(); } catch (eRP) {}
+            try { syncServerRows(); } catch (eSR) {}
+            toast('Game stayed on ' + (REGION_LABELS[key2] || key2.toUpperCase()) + ' - pill switched back - __murther.serverCheck() has the details', 'bad');
+          } else {
+            toast('Could not confirm the switch to ' + (REGION_LABELS[r] || r.toUpperCase()) + ' - the game list may still be loading - __murther.serverCheck() has the details', 'bad');
+          }
+        }, retried ? 1200 : 0);
+        return;
+      }
+      waited += 250;
+      regionVerifyTimer = setTimeout(pass, 250);
+    }
+    regionVerifyTimer = setTimeout(pass, 250);
   }
 
   /*
@@ -9964,6 +10079,11 @@ function applyChatResize() {
                 contentRows: $all('#server-content tr').length, nameCells: $all('[class*="server-table-name"]').length },
       listStatus: (function () { var st = $('.server-list-status'); return st ? srvNorm(st.className) + ' | ' + srvNorm(st.textContent).slice(0, 48) : null; })(),
       region: currentRegion, regions: regionOrder.join(','), nativeMain: !!N.main, menuOpen: menuOpen,
+      pillRegion: currentRegion,
+      nativeRegion: (function () { try { var a = nativeActiveTab(); return a ? nativeRegionKey(a) : null; } catch (eNR) { return 'error'; } })(),
+      tabContainer: (function () { try { var live = DOC.getElementById('server-tab-container'); return { live: !!live, cachedIsLive: N['server-tab-container'] === live, cachedConnected: !!(N['server-tab-container'] && N['server-tab-container'].isConnected) }; } catch (eTC) { return null; } })(),
+      tabs: (function () { try { return nativeTabs().map(function (t) { return String(t.textContent || '').trim().replace(/\s+/g, ' ') + ' => ' + nativeRegionKey(t) + ((t.classList && t.classList.contains('server-tab-active')) ? ' [active]' : ''); }); } catch (eTB) { return []; } })(),
+      pillClickAgeMs: lastPillClickAt ? (Date.now() - lastPillClickAt) : null,
       note: 'rows:0 while Murther\u2019s list is populated means the game list is refreshing (skeleton/loading), NOT that the pick is wrong; the join now proceeds and says so. selected:null means the game marks no row as selected.'
     };
   }
@@ -10065,31 +10185,82 @@ function applyChatResize() {
   }
 
   var lastPillClickAt = 0;
+  var lastNatKeySeen = null;   // debounce: a differing native key is adopted only on its second consecutive tick
+  var regionSwitchFrom = null; // { region, sigs, at }: the mirror's row set just before the last pill switch
+  function snapshotRegionRows() {
+    var sigs = UI.srvBody ? $all('.mx-srv-row', UI.srvBody).map(function (r) { return r.getAttribute('data-sig') || ''; }) : [];
+    regionSwitchFrom = { region: currentRegion, sigs: sigs, at: Date.now() };
+  }
+  function srvWaitingMsg() {
+    if (!UI.srvBody) return;
+    var label = REGION_LABELS[currentRegion] || String(currentRegion || '').toUpperCase() || '...';
+    var msg = 'Waiting for ' + label + ' servers - the game list is still loading...';
+    var empty = $('.mx-srv-empty', UI.srvBody);
+    if (!empty) txt(el('div', 'mx-srv-empty', UI.srvBody), msg);
+    else if (empty.textContent !== msg) txt(empty, msg);
+  }
+  function pillUnconfirmed() {
+    // The pill names currentRegion; unconfirmed means the game's own tab is
+    // visibly on another known region, or a switch was just requested that the
+    // game has not confirmed yet.
+    var key = null;
+    try { var act = nativeActiveTab(); key = act ? nativeRegionKey(act) : null; } catch (ePU) { key = null; }
+    if (key && key !== currentRegion && regionOrder.indexOf(key) !== -1) return true;
+    if (!key && lastPillClickAt > 0 && Date.now() - lastPillClickAt < 5000) return true;
+    return false;
+  }
+  function srvMirrorPool(list) {
+    // The column header is not a server, neither is a skeleton/filler row.
+    return (list || []).filter(function (row) {
+      if (!row) return false;
+      if (row.closest && row.closest('thead')) return false;
+      if (!srvNameOf(row)) return false;
+      return true;
+    });
+  }
   function syncServerRows() {
     if (!UI.srvBody) return;
     discoverRegions();
     renderRegionPills();
-    // Follow the game if IT switches the visible region — but never into a
+    // Follow the game if IT switches the visible region - but never into a
     // hidden one (ASIA PACIFIC): there Murther re-asserts the user's chosen tab
     // and mirrors nothing until the game swaps the rows back, so AP rows can
-    // never appear regardless of what the native UI does.
-    var nat = $('.server-tab-active', N['server-tab-container']);
+    // never appear regardless of what the native UI does. The container is read
+    // fresh (the game rebuilds menu nodes) and a differing key is adopted only
+    // on its second consecutive tick, so one mid-swap read can never yank the
+    // pill; a pill switch the user just made is blacked out for 5s to cover the
+    // game's async row load.
+    var nat = null;
+    try { nat = nativeActiveTab(); } catch (eNAT) { nat = null; }
     if (nat) {
-      var natKey = nat.getAttribute('data-mx-region') || nativeRegionKey(nat);
+      var natKey = null;
+      try { natKey = nat.getAttribute('data-mx-region') || nativeRegionKey(nat); } catch (eNK) { natKey = nativeRegionKey(nat); }
       if (!regionVisible(natKey)) {
         if (Date.now() - lastPillClickAt > 1200) { try { activateNativeRegion(currentRegion); } catch (e) {} }
         $all('.mx-srv-row', UI.srvBody).forEach(function (r) { r.remove(); });
         ensureEmptyState();
         return;
       }
-      if (natKey !== currentRegion && regionOrder.indexOf(natKey) !== -1 && Date.now() - lastPillClickAt > 2500) {
-        currentRegion = natKey;
-        renderRegionPills();
+      if (natKey !== currentRegion && regionOrder.indexOf(natKey) !== -1) {
+        if (natKey === lastNatKeySeen && Date.now() - lastPillClickAt > 5000) {
+          currentRegion = natKey;
+          lastNatKeySeen = null;
+          regionSwitchFrom = null;
+          renderRegionPills();
+        } else {
+          lastNatKeySeen = natKey;
+        }
+      } else {
+        lastNatKeySeen = null;
       }
+    } else {
+      lastNatKeySeen = null;
     }
     // STRICT region scoping: only rows whose containing region body matches the
     // active pill. Handles servers-body-eu / servers-body-na style containers and
-    // per-region tables; falls back to rows visible inside the active native tab.
+    // per-region tables; falls back to the single visible table (the live shape:
+    // the game swaps one table's rows per region) and only then to a
+    // document-wide sweep that excludes definitively foreign containers.
     var scope = null;
     if (currentRegion) {
       scope = DOC.getElementById('servers-body-' + currentRegion) ||
@@ -10098,15 +10269,20 @@ function applyChatResize() {
               $('#server-content [data-region="' + currentRegion + '"]');
     }
     function renderedRows(list) {
-      // rows the game hid (display:none) belong to other regions — exclude them
+      // rows the game hid (display:none) belong to other regions - exclude them
       return list.filter(function (r) {
         if (r.style && r.style.display === 'none') return false;
         return !r.getClientRects || r.getClientRects().length > 0;
       });
     }
+    function regionKeyOf(p) {
+      if (!p) return null;
+      try { return p.getAttribute('data-region') || (p.id || '').replace(/^servers-?(body-)?/, '').toLowerCase(); }
+      catch (eRK) { return null; }
+    }
     var rows;
     if (scope) {
-      rows = renderedRows($all('.server-row, tr', scope));
+      rows = renderedRows(srvMirrorPool($all('.server-row, tr', scope)));
       // scope exists but is empty because the game toggles per-region tables:
       // fall through to the visible-table sweep instead of showing a false empty state
       if (!rows.length) {
@@ -10114,25 +10290,58 @@ function applyChatResize() {
           return t.getClientRects && t.getClientRects().length > 0;
         });
         if (visT.length === 1) {
-          rows = renderedRows($all('.server-row, tr', $('tbody', visT[0]) || visT[0]));
+          rows = renderedRows(srvMirrorPool($all('.server-row, tr', $('tbody', visT[0]) || visT[0])));
         }
       }
     } else {
+      var singleT = $all('#server-content table, #main-servers .server-table, #server-content .server-table').filter(function (t) {
+        return t.getClientRects && t.getClientRects().length > 0;
+      });
+      var pool = singleT.length === 1 ? $all('.server-row, tbody tr', singleT[0]) : $all('.server-row');
       // no per-region container found: exclude rows only when their container is
       // definitively ANOTHER known region (containers like #servers-tbody that don't
-      // carry a region key stay in — the game swaps their rows per active region)
-      rows = renderedRows($all('.server-row').filter(function (row) {
+      // carry a region key stay in - the game swaps their rows per active region)
+      rows = renderedRows(srvMirrorPool(pool).filter(function (row) {
         var p = row.closest ? row.closest('[id^="servers-"], [data-region]') : null;
         if (!p) return true;
-        var pkey = p.getAttribute('data-region') || (p.id || '').replace(/^servers-?(body-)?/, '').toLowerCase();
-        return regionOrder.indexOf(pkey) === -1 || pkey === currentRegion;
+        var pkey = regionKeyOf(p);
+        return pkey === null || regionOrder.indexOf(pkey) === -1 || pkey === currentRegion;
       }));
     }
     var selectedName = null;
     var sel = scope ? $('.server-selected', scope) : $('.server-selected');
     if (sel) selectedName = (rowName(sel) || '').toLowerCase();
 
-    if (!rows.length) { ensureEmptyState(); return; }
+    // An EU pill over NA rows is the exact reported stuck state, so a switch
+    // the game has not confirmed yet says 'waiting' instead of showing the
+    // wrong region's rows; a genuine refresh (regions agree, list empty) keeps
+    // the v1.47 keep-rows behaviour.
+    if (!rows.length) {
+      if (pillUnconfirmed()) {
+        $all('.mx-srv-row', UI.srvBody).forEach(function (r) { r.remove(); });
+        srvWaitingMsg();
+        return;
+      }
+      ensureEmptyState();
+      return;
+    }
+    // The game's tab confirms the new region but its table still carries the
+    // old region's exact rows (same names AND same data - shared names alone
+    // cannot fake this): waiting, not stuck.
+    var nativeSigsEarly = rows.map(rowSignature);
+    if (regionSwitchFrom) {
+      if (Date.now() - regionSwitchFrom.at > 8000) {
+        regionSwitchFrom = null;
+      } else if (regionSwitchFrom.region !== currentRegion && regionSwitchFrom.sigs.length &&
+                 regionSwitchFrom.sigs.length === nativeSigsEarly.length &&
+                 nativeSigsEarly.every(function (s, i) { return s === regionSwitchFrom.sigs[i]; })) {
+        $all('.mx-srv-row', UI.srvBody).forEach(function (r) { r.remove(); });
+        srvWaitingMsg();
+        return;
+      } else {
+        regionSwitchFrom = null;
+      }
+    }
 
     // ---- diff pass: patch in place; rebuild only when the row set/order changes ----
     var cur = $all('.mx-srv-row', UI.srvBody);
@@ -13986,14 +14195,17 @@ function applyChatResize() {
     var idx = regionOrder.indexOf(currentRegion);
     var next = regionOrder[(idx + 1) % regionOrder.length];
     if (next === currentRegion) return;
+    snapshotRegionRows();
     currentRegion = next;
     lastPillClickAt = Date.now();
+    lastNatKeySeen = null;
     renderRegionPills();
     if (activateNativeRegion(next)) {
       toast('Region: ' + (REGION_LABELS[next] || next.toUpperCase()));
+      verifyNativeRegion(next);
       [120, 450, 900, 1500].forEach(function (d) { setTimeout(syncServerRows, d); });
     } else {
-      toast('Could not switch region', 'bad');
+      toast('Could not switch region - the game tab was not found - __murther.serverCheck() has the details', 'bad');
     }
   }
 
