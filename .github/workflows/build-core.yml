@@ -1,0 +1,31 @@
+# build-core.yml — zero-local-infra WASM build for the Auto Reverse core.
+# Drop-in location: <repo-root>/.github/workflows/build-core.yml, where
+# <repo-root> is the repo containing autoreverse-fisen/ (paths below assume
+# the workflow runs with that layout; adjust `working-directory` otherwise).
+# Run: GitHub → Actions → build-core → Run workflow → download the
+# `fisen-core` artifact → paste fisen_core.js verbatim above the
+# MX_AUTOREVERSE_CORE block in murther.user.js → reload the game tab →
+# demand __murther.state().autoReverse.wasm.ready === true in console.
+name: build-core
+on:
+  workflow_dispatch:
+jobs:
+  wasm:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: autoreverse-fisen
+    steps:
+      - uses: actions/checkout@v4
+      - name: emsdk
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.61
+      - run: emcc -v
+      - run: bash build_core.sh wasm
+      - name: artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fisen-core
+          path: autoreverse-fisen/fisen_core.js
+          retention-days: 7

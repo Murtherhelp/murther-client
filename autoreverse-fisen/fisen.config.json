@@ -1,0 +1,7 @@
+{
+  "bridge_port": 8765,
+  "log_dir": "./logs",
+  "max_log_size_bytes": 716800,
+  "report_output": "./fisen_report.json",
+  "lock_file": "./.fisen.lock"
+}

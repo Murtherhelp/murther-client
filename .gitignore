@@ -1,0 +1,33 @@
+# MurtherClient — shared ignores
+# Never commit the thing that observes (logs, locks, dumps) or the thing
+# node_modules installs. Build artifacts are CI-made, not committed.
+
+# --- dependencies ---
+node_modules/
+
+# --- Fisen observation runtime (regenerated every run) ---
+autoreverse-fisen/logs/
+autoreverse-fisen/__pycache__/
+autoreverse-fisen/.fisen.lock
+autoreverse-fisen/fisen_report.json
+autoreverse-fisen/fisen_dump.json
+autoreverse-fisen/fisen_capture.har
+
+# --- build artifacts (CI produces these) ---
+autoreverse-fisen/fisen_core.js
+autoreverse-fisen/test_core
+test_core
+
+# --- local safety backups (stay on disk, never in git) ---
+*.bak-*
+*.bak-step5
+*.mine-*
+
+# --- neighbouring trackers' runtime (same rule as ours) ---
+Camlan Tracker/__pycache__/
+Camlan Tracker/captures/
+.freebuff/preview.err
+.freebuff/preview.log
+
+# --- explicitly private (folder name asks for no access) ---
+/Ignore this Folder if I DON'T give you ACCESS/

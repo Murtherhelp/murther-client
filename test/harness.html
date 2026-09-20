@@ -1,0 +1,1225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Murther — local harness (mock of play.gota.io DOM)</title>
+<style>
+  html,body{margin:0;height:100%;background:#10131c;overflow:hidden;font-family:Inter,system-ui,sans-serif}
+  #canvas{position:absolute;inset:0;width:100%;height:100%;background:radial-gradient(600px 400px at 30% 30%, #1a2030 0%, #10131c 60%)}
+  /* ---- mock native gota DOM (IDs/classes verified from Ci3kQZaT.css) ---- */
+  #main{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:820px;display:flex;gap:14px;z-index:10}
+  .main-panel{background:#181c28;border-radius:8px;padding:16px;flex:0 0 320px;display:flex;flex-direction:column;gap:10px}
+  .main-right-panel{background:#181c28;border-radius:8px;padding:16px;flex:1}
+  #logo{font-size:30px;font-weight:800;color:#fff;text-align:center;letter-spacing:2px}
+  #name-box,#id-box{width:100%;padding:10px;border-radius:6px;border:1px solid #2a3040;background:#10131c;color:#e8e8f0;box-sizing:border-box}
+  #btn-play{padding:13px;border:none;border-radius:6px;background:#f5b53a;color:#1a1a1a;font-weight:800;font-size:16px;cursor:pointer}
+  #btn-spec{padding:11px;border:none;border-radius:6px;background:#232938;color:#cfd4e0;font-weight:700;cursor:pointer}
+  .gota-menu-btn{flex:1;text-align:center;padding:9px;background:#1c2231;color:#8a92a6;font-size:13px;font-weight:700;border-radius:6px;cursor:pointer}
+  .gota-menu-btn.active{background:#2a3247;color:#fff}
+  #main-right{flex:1;display:flex;flex-direction:column;gap:8px}
+  #server-tab-container{display:flex;gap:6px}
+  .server-tab{padding:7px 20px;background:#232938;border-radius:6px;color:#cfd4e0;font-weight:700;font-size:13px;cursor:pointer}
+  .server-tab span{pointer-events:none}
+  .server-tab.server-tab-active{background:#f5b53a;color:#1a1a1a}
+  #server-content{max-height:330px;overflow-y:auto}
+  .server-table{width:100%;border-collapse:collapse}
+  .server-table th{font-size:10px;letter-spacing:1.5px;color:#79808f;text-transform:uppercase;text-align:left;padding:4px 8px}
+  .server-table th:last-child,.server-table td:last-child{text-align:right}
+  .server-row{cursor:pointer}
+  .server-row td{padding:9px 8px;color:#d5dae6;font-size:14px;border-radius:6px}
+  .server-row:hover td{background:#202636}
+  .server-row.server-selected td{background:rgba(245,181,58,.14)}
+  .server-row.server-selected .server-table-name{color:#f5b53a;font-weight:700}
+  /* HUD */
+  #score-panel{position:absolute!important;right:14px!important;top:14px!important;background:rgba(245,181,58,.12)!important;border:2px solid #f5b53a!important;border-radius:8px!important;padding:10px 14px!important;color:#ffd166!important;font-size:13px!important;z-index:2147483001!important;font-family:Calibri;font-weight:700}
+  #score-panel p{margin:0 10px;white-space:nowrap;line-height:1.35}
+  #score-panel b{color:#ffd166!important}
+  #leaderboard-panel{position:absolute!important;right:14px!important;top:150px!important;width:200px!important;background:rgba(245,181,58,.12)!important;border:2px solid #f5b53a!important;border-radius:8px!important;overflow:hidden!important;z-index:2147483001!important}
+  #leaderboard-header{padding:7px!important;text-align:center!important;color:#1a1a1a!important;font-weight:800!important;font-size:13px!important;background:#f5b53a!important}
+  #leaderboard-canvas{display:block!important;width:100%!important;height:190px!important}
+  #minimap-panel{position:absolute!important;left:14px!important;bottom:14px!important;background:rgba(245,181,58,.12)!important;border:2px solid #f5b53a!important;border-radius:8px!important;padding:6px!important;z-index:2147483001!important}
+  #minimap-canvas{display:block!important;width:180px!important;height:180px!important;background:#0a0c12!important;border-radius:6px!important}
+  #minimap-coordinates{text-align:center!important;color:#f5b53a!important;font-size:10px!important;margin-top:4px!important;font-family:monospace!important}
+  #chat-panel{position:absolute!important;left:14px!important;bottom:216px!important;width:330px!important;z-index:2147483001!important}
+  #chat-container{background:rgba(245,181,58,.12)!important;border:2px solid #f5b53a!important;border-radius:8px!important;padding:8px!important;height:160px!important;overflow-y:auto!important;box-sizing:border-box!important}
+  .chat-table{width:100%;border-collapse:collapse}
+  .chat-table td{color:#f5e6c0!important;font-size:12.5px!important;padding:1px 0!important}
+  #chat-input{width:100%!important;margin-top:6px!important;padding:9px 10px!important;border-radius:8px!important;border:2px solid #f5b53a!important;background:rgba(245,181,58,.12)!important;color:#f5e6c0!important;box-sizing:border-box!important}
+  #extra-panel{position:absolute!important;left:50%!important;top:0!important;transform:translateX(-50%)!important;background:rgba(245,181,58,.12)!important;border:2px solid #f5b53a!important;border-top:none!important;border-radius:0 0 8px 8px!important;color:#f5b53a!important;font-size:12px!important;padding:6px 14px!important;z-index:2147483001!important;font-family:Calibri;font-weight:700}
+  #extra-panel p{margin:0 10px;white-space:nowrap}
+  #party-panel{position:absolute!important;left:14px!important;top:14px!important;background:rgba(245,181,58,.12)!important;border:2px solid #f5b53a!important;border-radius:8px!important;padding:8px 12px!important;color:#fff!important;font-size:13px!important;z-index:2147483001!important;font-family:Calibri;font-weight:700}
+  #party-panel p{margin:2px 0;white-space:nowrap}
+  #ad-wrapper{position:absolute!important;left:50%!important;bottom:10px!important;transform:translateX(-50%)!important;background:#f5b53a!important;color:#1a1a1a!important;padding:8px 40px!important;border-radius:6px!important;font-size:11px!important;z-index:2147483001!important}
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+
+<div id="extra-panel"><p>Server: <span id="extra-server">EU #1 — Vendetta</span></p><p>Ping: <span id="extra-ping">85</span>ms &nbsp;|&nbsp; FPS: <span id="extra-fps">144</span></p>
+  <!-- v1.36.0: the game's own reset timer + spectator count. Murther mirrors these into
+       the leaderboard footer, so the fixture carries them and ticks them live. -->
+  <p>Spectators: <span id="extra-spec">3</span></p>
+  <p>Reset: <span id="extra-reset">2:31</span></p>
+  <!-- v1.39.0: the game's OWN respawn timer + client version rows. v1.43.0 dropped the
+       footer's Respawn COLUMN but keeps this row on purpose: it is what the parser's label
+       vocabulary needs to end the Spectators value, so __mxFootCheck still fails if it goes. -->
+  <p>Respawn: <span id="extra-respawn">0:07</span></p>
+  <p>Client version: <span id="extra-client">v1.39.0-fixture</span></p>
+</div>
+
+<div id="main">
+  <div class="main-panel">
+    <div id="logo">GOTA.IO</div>
+    <input id="name-box" placeholder="Nick" value="Murther">
+    <input id="id-box" placeholder="Tag" value="[MX]">
+    <button id="btn-play">Play</button>
+    <button id="btn-spec">Spectate</button>
+    <div style="display:flex;gap:6px;margin-top:4px">
+      <div class="gota-menu-btn active">Servers</div>
+      <div class="gota-menu-btn">Settings</div>
+      <div class="gota-menu-btn">Hotkeys</div>
+    </div>
+    <!-- v1.38.0: the game's own two editor buttons (icon-only, like the real client) are
+         added by test/panels-fixture.js together with the editor stubs, so the harness
+         and the preview page cannot drift apart. -->
+    <!-- native Options controls (stub of the real #main-options panel): lets the
+         Murther settings bridge be exercised with the game's own controls -->
+    <!-- native Options workspace (stub of the REAL panel): .options-panel-shell holding
+         .settings-row divs with a label node, an optional description and NO ids (the old
+         client's ids died with donutextension.js). v1.37.1. -->
+    <div id="main-options" class="options-panel-shell" style="display:none">
+      <div class="settings-row"><span class="settings-row__label-text">Show Names</span><select id="sShowNames"><option>Off</option><option selected>All</option><option>Self</option></select></div>
+      <div class="settings-row"><span class="settings-row__label">Show Skins</span><select><option>Off</option><option selected>All</option><option>Self</option></select></div>
+      <div class="settings-row"><div class="settings-row__label-text">Show Mass</div><select><option>Off</option><option selected>On</option></select></div>
+      <!-- v1.40.0: the game's rows whose labels COLLIDE with Murther's matchers (k160/k161/k215/k151):
+           "Show mass" must bind the Show Mass row, never these, and a loose matcher leaves them alone. -->
+      <div class="settings-row"><span class="settings-row__label-text">Mass Type</span><select><option selected>Default</option><option>Bar</option><option>Percentage</option></select></div>
+      <div class="settings-row"><span class="settings-row__label-text">Show mass on P2</span><input type="checkbox"></div>
+      <div class="settings-row"><span class="settings-row__label-text">Disable Auto Skin Hiding</span><input type="checkbox"></div>
+      <div class="settings-row"><div class="label-text">Hide Food</div><input type="checkbox"></div>
+      <!-- v1.59.1: the live build ships this neighbour (Game Files/Ch0q9gw8.js "Disable Auto
+           Food Hiding"). hideFood must bind Hide Food above, never this row - see __mxFoodCheck. -->
+      <div class="settings-row"><span class="settings-row__label-text">Disable Auto Food Hiding</span><input type="checkbox"></div>
+      <div class="settings-row"><span class="settings-row__label-text">Border:</span><small class="settings-row__desc">Game border size. Zoom, focus, and camera smoothing behaviour.</small><input type="range" min="0" max="100" step="1" value="50"></div>
+      <div class="settings-row"><span class="settings-row__label-text">Disable Auto Zoom</span><input type="checkbox" checked></div>
+      <div class="settings-row"><span class="settings-row__label-text">Zoom Speed:</span><select><option>50%</option><option selected>100%</option><option>150%</option><option>200%</option></select></div>
+      <div class="settings-row"><span class="settings-row__label-text">Zoom Delay:</span><small class="settings-row__desc">Zoom, focus, and camera smoothing behaviour.</small><select><option>None</option><option selected>Short</option><option>Medium</option><option>Long</option></select></div>
+      <div class="settings-row"><span class="settings-row__label-text">Auto Respawn</span><input type="checkbox"></div>
+      <div class="settings-row"><span class="settings-row__label-text">Auto Decline Party Invites</span><input type="checkbox"></div>
+      <div class="settings-row settings-row--dependency-disabled"><span class="settings-row__label-text">Coloured Chat IDs</span><input type="checkbox"></div>
+      <div class="settings-row"><span class="settings-row__label-text">Hide ID</span><input type="checkbox"></div>
+      <div class="settings-row"><span class="settings-row__label-text">View Distance:</span><input type="range" min="50" max="400" step="10" value="150"></div>
+    </div>
+    <!-- native Themes workspace stub, same markup. v1.38.0: it also carries the game's
+         own category rail (World … Presets) and theme rows, and it starts HIDDEN + with
+         the `hidden` attribute — the paint-roller button reveals it, so both halves of
+         the reveal path (inline display + attribute) are exercised. -->
+    <div id="main-themes" class="options-panel-shell" hidden style="display:none">
+      <div class="theme-options-tabs">
+        <button class="theme-options-tab active" data-cat="world">World</button>
+        <button class="theme-options-tab" data-cat="interface">Interface</button>
+        <button class="theme-options-tab" data-cat="grid">Grid</button>
+        <button class="theme-options-tab" data-cat="objects">Objects</button>
+        <button class="theme-options-tab" data-cat="effects">Effects</button>
+        <button class="theme-options-tab" data-cat="presets">Presets</button>
+      </div>
+      <div class="theme-options-container">
+      <div class="settings-row"><span class="settings-row__label-text">Accent color</span><input type="color" id="mx-stub-accent" value="#f5b53a"></div>
+      <div class="settings-row"><span class="settings-row__label-text">Panel opacity</span><input type="range" id="mx-stub-panelopacity" min="0" max="100" value="100"></div>
+      <div class="settings-row"><span class="settings-row__label-text">Show grid</span><input type="checkbox" id="mx-stub-gridshow"></div>
+      <div class="settings-row"><span class="settings-row__label-text">Virus skin</span><input type="text" id="mx-stub-virusskin" placeholder="Image URL"></div>
+      <div class="settings-row"><span class="settings-row__label-text">Food colors</span><span id="pFoodColors"></span></div>
+      <div class="settings-row"><span class="settings-row__label-text">Pastel Self</span><input type="checkbox" checked></div>
+      <div class="settings-row"><span class="settings-row__label-text">Pastel Friends</span><input type="checkbox"></div>
+      <div class="settings-row"><span class="settings-row__label-text">Pastel Bots</span><input type="checkbox"></div>
+      <div class="settings-row"><span class="settings-row__label-text">Pastel Enemies</span><input type="checkbox"></div>
+      <div class="settings-row"><span class="settings-row__label-text">Pastel Food</span><input type="checkbox"></div>
+      <div class="settings-row"><span class="settings-row__label-text">Pastel Ejected Mass</span><input type="checkbox"></div>
+      <div class="settings-row"><span class="settings-row__label-text">Pastel intensity:</span><input type="range" min="0" max="100" step="5" value="50"></div>
+      </div>
+    </div>
+  </div>
+  <div class="main-right-panel" id="main-right">
+    <div id="server-tab-container">
+      <div class="server-tab server-tab-active" data-region="eu"><span>EUROPE</span></div>
+      <div class="server-tab" data-region="na"><span>NORTH AMERICA</span></div>
+      <div class="server-tab" data-region="ap"><span>ASIA PACIFIC</span></div>
+    </div>
+    <div id="main-servers">
+      <div id="server-content">
+        <!-- live-accurate: ONE visible .server-table; the native code swaps rows per region -->
+        <table class="server-table">
+          <thead><tr><th class="server-table-name">NAME</th><th class="server-table-players">PLAYERS</th><th class="server-table-mode">MODE</th></tr></thead>
+          <tbody id="servers-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<div id="score-panel"><p>Mass: <span id="sc-mass">0</span></p><p>Score: <span id="sc-score">0</span></p><p>Cells: <span id="sc-cells">0/16</span></p></div>
+
+<div id="leaderboard-panel">
+  <div id="leaderboard-header">Leaderboard</div>
+  <canvas id="leaderboard-canvas" width="400" height="380"></canvas>
+</div>
+
+<div id="minimap-panel">
+  <canvas id="minimap-canvas" width="360" height="360"></canvas>
+  <div id="minimap-coordinates">x:0 y:0</div>
+</div>
+
+<div id="chat-panel">
+  <div id="chat-container">
+    <table class="chat-table"><tbody id="chat-tbody"></tbody></table>
+  </div>
+  <input id="chat-input" placeholder="Message" maxlength="80">
+</div>
+
+<div id="party-panel" style="display:none">Player1<br>Player2</div>
+
+<div id="ad-wrapper">ADVERTISEMENT 336x280</div>
+
+<script>
+/* ---- mock game simulator: makes the harness behave like the live page ---- */
+(function(){
+  // Native format (CvtptewX.js): the players cell shows the RAW count (no "/max"),
+  // and the exact breakdown is exposed as title="Players: X\nBots: Y" when bots > 0.
+  var EU = [['Vendetta',96,18,'Free For All'],['Zeus',24,0,'Experimental'],['Diamond',27,6,'Instant Merge'],
+            ['Bolt',0,0,'Self Feed'],['Underworld',84,12,'Mega Split'],['Sedulous',119,0,'Ultra Split (256x)'],
+            ['Storm',103,0,'Ultra Split (256x)'],['Arubis',40,5,'Powerups'],['Cerberus',24,0,'Instant Merge 2'],
+            ['Galaxy',62,0,'Ultra Split'],['Beta',4,0,'Scrimmage'],['Beta2',81,0,'Rush Split (128x)'],
+            /* v1.36.0: the widest count + the longest name the client has to lay out */
+            ['Underworld (Hardcore Split 256x)', '111/150*', 60, 'Ultra Split (256x)'],
+            ['Cerberus', '20/200*', 20, 'Instant Merge 2']];
+  var NA = [['Rex',12,4,'Free For All'],['Frenzy',55,0,'Experimental'],['Nova',31,0,'Instant Merge'],
+            ['Havoc',8,0,'Self Feed'],['Titan',71,9,'Mega Split'],['Zenith',44,0,'Ultra Split (256x)']];
+  var AP = [['Shogun',21,3,'Free For All'],['Sakura',18,0,'Instant Merge'],['Ronin',33,6,'Mega Split']];
+
+  var activeRegion='eu';
+  function rows(region){ return region==='eu'?EU:(region==='ap'?AP:NA); }
+  function renderServers(region){
+    activeRegion=region;
+    var tb=document.getElementById('servers-tbody');
+    if(!tb) return;
+    tb.innerHTML='';
+    rows(region).forEach(function(r,i){
+      var tr=document.createElement('tr');
+      tr.className='server-row'+((i===0)?' server-selected':'');
+      var td1=document.createElement('td'); td1.className='server-table-name'; td1.textContent=r[0];
+      var td2=document.createElement('td'); td2.className='server-table-players'; td2.textContent=String(r[1]);
+      if(r[2]>0) td2.title='Players: '+r[1]+'\nBots: '+r[2];
+      var td3=document.createElement('td'); td3.className='server-table-mode'; td3.textContent=r[3];
+      tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
+      tr.addEventListener('click',function(){
+        tb.querySelectorAll('.server-row').forEach(function(x){x.classList.remove('server-selected')});
+        tr.classList.add('server-selected');
+        var es=document.getElementById('extra-server');
+        if(es) es.textContent=r[0]+' — '+r[3];
+      });
+      tb.appendChild(tr);
+    });
+  }
+  renderServers('eu');
+  document.querySelectorAll('.server-tab').forEach(function(t){
+    t.addEventListener('click',function(){
+      document.querySelectorAll('.server-tab').forEach(function(x){x.classList.remove('server-tab-active')});
+      t.classList.add('server-tab-active');
+      renderServers(t.getAttribute('data-region'));
+    });
+  });
+
+  // party roster: hidden until the player has a team (game behavior)
+  window.__setParty = function(members){
+    var pp = document.getElementById('party-panel');
+    if (!members || !members.length) { pp.style.display = 'none'; pp.innerHTML = ''; return; }
+    pp.style.display = '';
+    pp.innerHTML = members.map(function(m){return '<p>'+m+'</p>';}).join('');
+  };
+  var ppBtn = document.createElement('button');
+  ppBtn.id = 'sim-party-toggle';
+  ppBtn.textContent = '[SIM] toggle party';
+  ppBtn.style.cssText = 'position:fixed;top:44px;right:10px;z-index:99999;background:#7c3aed;color:#fff;border:none;border-radius:8px;padding:8px 12px;font-weight:700;cursor:pointer';
+  var inParty = false;
+  ppBtn.addEventListener('click', function(){
+    inParty = !inParty;
+    window.__setParty(inParty ? ['Ray', 'Kiro', 'MurtherBot'] : null);
+  });
+  document.body.appendChild(ppBtn);
+
+  /* leaderboard canvas drawing — v1.39.0 fixture shape.
+   * The REAL board draws the rank as its own text run ("1." at one x, the nick at
+   * another, the mass right-aligned), and Murther's rank-drop animation reads its place
+   * from exactly that token — so the fixture draws it that way too. The order lives in
+   * `names` and is driven through window.__mxLb, which makes a place change testable:
+   *   __mxLb.swap(0,1)  — swap two rows;  __mxLb.drop() — push the owner down a place;
+   *   __mxLb.gain()     — pull them back up;  __mxLb.order() — what the board shows now. */
+  var names=['Murther','xX_Slayer_Xx','nyx','Reicon','Cal','Moncler','Julius','Sai 赛','Sameru','Kiro'];
+  var lb=document.getElementById('leaderboard-canvas'), lbc=lb.getContext('2d');
+  var massSeed=names.map(function(_,i){return 4200-i*367+Math.random()*120});
+  function drawLB(){
+    lbc.clearRect(0,0,lb.width,lb.height);
+    lbc.font='700 20px Inter,sans-serif';
+    names.forEach(function(n,i){
+      var y=34+i*34;
+      lbc.textAlign='left';
+      lbc.fillStyle='#8a92a6';
+      lbc.fillText((i+1)+'.',14,y);                       // the rank token on its own
+      lbc.fillStyle=i===0?'#f5b53a':'#d5dae6';
+      lbc.fillText(n,44,y);                               // the nick
+      lbc.textAlign='right';
+      lbc.fillStyle='#8a92a6';
+      lbc.fillText(String(Math.round(massSeed[i]+Math.sin(Date.now()/900+i)*60)),lb.width-14,y);
+    });
+  }
+  /* ---- footer parser check (v1.42.1, three columns since v1.43.0) -------------------
+     The game's own extra strip is ONE flat text node with no newlines:
+       "Reset: 15:09 Spectators: 0 Respawn: 00:00 Client version: 1.42"
+     This swaps that exact shape into the stub, reads the footer's columns back and restores
+     the stub:
+       await __mxFootCheck() -> { ok, flat, cells, columns: { reset, time, spec } }
+     v1.43.0 removed the Respawn COLUMN but not the row: the stub keeps its Respawn entry on
+     purpose, so this also proves the Spectators capture still stops before it - if 'Respawn'
+     ever left the parser's label vocabulary, spec would come back as its dash and fail. */
+  window.__mxFootCheck = function (text) {
+    var ep = document.getElementById('extra-panel');
+    var foot = document.querySelector('.mx-lb-foot');
+    if (!ep || !foot) return Promise.resolve({ ok: false, why: 'no #extra-panel stub or no footer' });
+    var flat = text || 'Reset: 15:09 Spectators: 0 Respawn: 00:00 Client version: 1.42';
+    var saved = ep.innerHTML;
+    ep.textContent = flat;
+    function read() {
+      var o = {};
+      foot.querySelectorAll('.mx-lbf').forEach(function (c) {
+        var lab = (c.querySelector('.mx-lbf-lab') || {}).textContent, v = (c.querySelector('b') || {}).textContent;
+        if (lab) o[lab.toLowerCase()] = v;
+      });
+      return o;
+    }
+    // readiness must be a CHANGE, not merely a value: the footer already carries the running
+    // game's numbers, so "is it non-empty" is satisfied before the client ever re-derives
+    var before = read();
+    return new Promise(function (resolve) {
+      var t0 = Date.now(), cols = before, changed = false;
+      (function poll() {
+        cols = read();
+        changed = cols.reset !== before.reset || cols.spec !== before.spec;
+        if (changed || Date.now() - t0 > 3500) {
+          ep.innerHTML = saved;   // hand the stub back exactly as it was
+          resolve({ ok: changed && cols.reset === '15:09' && cols.spec === '0', flat: flat,
+                    cells: foot.children.length, columns: cols, before: before });
+          return;
+        }
+        setTimeout(poll, 100);
+      })();
+    });
+  };
+
+  /* ---- pellet bridge check (v1.59.1) ---------------------------------------------------
+     "Show pellets" OFF must hide food even when the game's own Hide Food row is a
+     custom switch or missing. Drives the REAL bridge (__murther.nativeSet /
+     nativeDump / rescan) through three states of the stub and asserts:
+       (a) checkbox row: true/false both land on the control;
+       (b) custom-switch row (div[role=switch], the workspace shape): the bridge
+           finds it by label, clicks it, and aria-checked flips both ways;
+       (c) the neighbour "Disable Auto Food Hiding" is never bound to hideFood
+           and is never written.
+     The stub is handed back exactly as it was (checkbox restored, bridge rescanned).
+       await __mxFoodCheck() -> { ok, bindsHideFood, notAutoHide, checkOn, checkOff,
+                                  switchFound, switchOn, switchOff, autoUntouched, ... } */
+  window.__mxFoodCheck = function () {
+    var out = { ok: false, steps: [] };
+    var M = window.__murther;
+    if (!M || !M.nativeSet || !M.nativeDump || !M.rescan) return Promise.resolve({ ok: false, why: 'no __murther bridge API' });
+    function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+    function rows() { return Array.prototype.slice.call(document.querySelectorAll('#main-options .settings-row')); }
+    function labelOf(r) {
+      var l = r.querySelector('.settings-row__label-text, .label-text, label');
+      return l ? l.textContent.replace(/\s+/g, ' ').trim() : r.textContent.replace(/\s+/g, ' ').trim().slice(0, 40);
+    }
+    function hideFoodRow() {
+      var hit = rows().filter(function (r) { return labelOf(r).toLowerCase() === 'hide food'; });
+      return hit[0] || null;
+    }
+    function autoRow() {
+      var hit = rows().filter(function (r) { return labelOf(r).toLowerCase() === 'disable auto food hiding'; });
+      return hit[0] || null;
+    }
+    function ctlOf(r) { return r ? r.querySelector('input, select, [role="switch"], [role="checkbox"], button[aria-pressed], [aria-checked]') : null; }
+    var row = hideFoodRow();
+    if (!row) return Promise.resolve({ ok: false, why: 'no Hide Food row in stub' });
+    var origCtl = ctlOf(row);
+    var au = autoRow();
+    var autoBefore = au && ctlOf(au) ? !!ctlOf(au).checked : null;
+    out.autoPresent = !!au;
+    return wait(250).then(function () {
+      M.rescan();
+      var d = M.nativeDump();
+      out.bindsHideFood = !!(d.matched && d.matched.hideFood);
+      out.bindLabel = d.matchedLabel && d.matchedLabel.hideFood;
+      out.notAutoHide = !out.bindLabel || out.bindLabel.toLowerCase().indexOf('disable auto') === -1;
+      // (a) the checkbox both ways
+      var w1 = M.nativeSet('hideFood', true);
+      out.checkOn = !!(w1.ok && ctlOf(row) && ctlOf(row).checked === true);
+      out.steps.push('checkbox on: ' + (out.checkOn ? 'landed' : 'FAILED (' + JSON.stringify({ ok: w1.ok, rejected: w1.rejected }) + ')'));
+      var w2 = M.nativeSet('hideFood', false);
+      out.checkOff = !!(w2.ok && ctlOf(row) && ctlOf(row).checked === false);
+      out.steps.push('checkbox off: ' + (out.checkOff ? 'landed' : 'FAILED (' + JSON.stringify({ ok: w2.ok, rejected: w2.rejected }) + ')'));
+      // (b) swap in a workspace-style custom switch (click toggles the attribute)
+      var sw = document.createElement('div');
+      sw.setAttribute('role', 'switch');
+      sw.setAttribute('aria-checked', 'false');
+      sw.setAttribute('tabindex', '0');
+      sw.addEventListener('click', function () {
+        sw.setAttribute('aria-checked', sw.getAttribute('aria-checked') === 'true' ? 'false' : 'true');
+      });
+      var cur = ctlOf(row);
+      if (cur && cur.parentNode) cur.parentNode.replaceChild(sw, cur);
+      M.rescan();
+      return wait(250).then(function () { return sw; });
+    }).then(function (sw) {
+      var d = M.nativeDump();
+      out.switchFound = !!(d.matched && d.matched.hideFood);
+      out.switchLabel = d.matchedLabel && d.matchedLabel.hideFood;
+      var s1 = M.nativeSet('hideFood', true);
+      out.switchOn = !!(s1.ok && sw.getAttribute('aria-checked') === 'true');
+      out.steps.push('switch on: ' + (out.switchOn ? 'clicked + flipped' : 'FAILED (' + JSON.stringify({ ok: s1.ok, control: s1.control, rejected: s1.rejected }) + ')'));
+      var s2 = M.nativeSet('hideFood', false);
+      out.switchOff = !!(s2.ok && sw.getAttribute('aria-checked') === 'false');
+      out.steps.push('switch off: ' + (out.switchOff ? 'clicked + flipped' : 'FAILED (' + JSON.stringify({ ok: s2.ok, control: s2.control, rejected: s2.rejected }) + ')'));
+      // hand the stub back: checkbox restored, bridge rescanned
+      var back = document.createElement('input');
+      back.type = 'checkbox';
+      if (sw.parentNode) sw.parentNode.replaceChild(back, sw);
+      M.rescan();
+      return wait(250);
+    }).then(function () {
+      var au2 = autoRow();
+      var auCtl = ctlOf(au2);
+      out.autoUntouched = au2 ? (auCtl ? auCtl.checked === !!autoBefore : false) : false;
+      var d = M.nativeDump();
+      out.finalBind = d.matchedLabel && d.matchedLabel.hideFood;
+      out.ok = !!(out.bindsHideFood && out.notAutoHide && out.checkOn && out.checkOff &&
+                  out.switchFound && out.switchOn && out.switchOff && out.autoUntouched &&
+                  out.finalBind && out.finalBind.toLowerCase().indexOf('disable auto') === -1);
+      try { console.log('[murther] food check', out); } catch (eL) {}
+      return out;
+    });
+  };
+
+  /* ---- gota-ws-hook coexistence check (v1.49.0) --------------------------------------
+     Audited on the two real files, the two scripts could fight in five distinct ways; this
+     exercises the CLIENT's half of every contract against a STUB of the hook's own public
+     surface (window.__mxHook: version / bindings() / bind(owner, code) / cancelBind() /
+     log()), which is exactly what gota-ws-hook 2.3.9-2.3.10 exposes:
+
+       (a) OWNERSHIP. The client must stamp the wrapper it made (__murtherHook), publish
+           __murtherReverseOwner, and must NOT write the shared window.__murtherWsHook flag -
+           that flag is the HOOK's own first-run guard, and the client writing it was how the
+           hook's guard came to read the client's install as its own re-run.
+       (b) THE FREEZE. A hook that ships freezeMode on KeyF (the GAME's Sextuple Split) and
+           freeze mode's transform (every input tick rewritten to 0,0) is what stopped the
+           cell dead in normal play. The client must free freezeMode / toggleReverse /
+           cycleReverse THROUGH THE HOOK'S OWN API, while keeping resetReverse - the way back
+           is never released.
+       (c) THE MODE REPORT. A mode that is not reverse, while the mode is on, must be named
+           as a danger instead of being left to be inferred from a symptom.
+       (d) THE REPAIR. hookRepair() must put the mode back on plain reverse and report what
+           it replaced - it is also the way out of an already-frozen cell.
+   (e) NO TRAP HANDSHAKE (v1.58.0: the anti-debug engine is removed). trapAt /
+       devtoolsSuspected / devguard must be ABSENT from the shared toggle - the client
+       publishes nothing, so the hook's 1.5s stall guard treats every long stall as
+       genuine. These assertions are the lock against the feature coming back.
+
+       await __mxHookCheck() -> { ok, stubSeen, owner, version, released*, keptReset,
+                                    releasedBinds, danger, modeReported, repairWas,
+                                    repairedTo, trapGone, devtoolsGone, devguardGone, syncErrs, stamped,
+                                    sharedFlagUntouched, pickerSeen, calls }
+
+     The release runs ONCE per load in the client, so this forces a second pass with the
+     documented handle (hookRelease(true)) - the same call the Hotkeys card's button makes. */
+  window.__mxHookCheck = function () {
+    var calls = [];
+    var binds = { toggleReverse: 'KeyR', cycleReverse: 'KeyM', freezeMode: 'KeyF', resetReverse: 'KeyX', fire: '', modes: {} };
+    var out = { ok: false };
+    var R = window.__murtherReverse = window.__murtherReverse || { on: false, flips: 0, at: 0, mode: 'reverse' };
+    var modeWas = R.mode, onWas = R.on;
+    function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+    window.__mxHook = {
+      version: '2.3.9-stub',
+      bindings: function () { return JSON.parse(JSON.stringify(binds)); },
+      bind: function (owner, code) { calls.push('bind:' + owner + '=' + (code || '')); binds[owner] = code || ''; },
+      cancelBind: function () { calls.push('cancelBind'); return true; },
+      log: function () { return { v: '2.3.9-stub' }; }
+    };
+    window.__mxHookCapture = { active: true, owner: 'toggleReverse', repaint: null };
+    return wait(700)                     // the sync is rAF-driven and throttled to 250ms
+      .then(function () {
+        var st = window.__murther.hook();
+        out.stubSeen = !!st.hook;
+        out.owner = st.owner;
+        out.version = st.version;
+        out.autoReleased = Array.isArray(st.released) && st.released.length > 0;
+        out.pickerSeen = st.pick;
+        out.freed = window.__murther.hookRelease(true);
+        out.releasedFreeze = binds.freezeMode === '';
+        out.releasedToggle = binds.toggleReverse === '';
+        out.releasedCycle = binds.cycleReverse === '';
+        out.keptReset = binds.resetReverse === 'KeyX';
+        out.releasedBinds = calls.filter(function (c) { return /^bind:/.test(c); }).length;
+        out.calls = calls.slice();
+        R.mode = 'freeze'; R.on = true;   // the dead-stop state, exactly as the report described it
+        return wait(700);
+      })
+      .then(function () {
+        var st = window.__murther.hook();
+        out.danger = st.danger;
+        out.modeReported = st.mode;
+        out.repairWas = window.__murther.hookRepair();
+        out.repairedTo = R.mode;
+        /* v1.58.0: read the RAW toggle and assert ABSENCE - the anti-debug engine is
+           removed, so the client must publish no trap evidence at all. If any of these
+           fields reappears, the feature is coming back and this check fails. */
+        out.trapGone = typeof R.trapAt === 'undefined';
+        out.devtoolsGone = typeof R.devtoolsSuspected === 'undefined';
+        out.devguardGone = typeof R.devguard === 'undefined';
+        out.syncErrs = st.syncErrs; out.syncError = st.syncError;
+        out.stamped = !!(window.WebSocket && window.WebSocket.prototype.send && window.WebSocket.prototype.send.__murtherHook);
+        out.ownerRecord = (window.__murtherReverseOwner && window.__murtherReverseOwner.name) || '';
+        out.sharedFlagUntouched = (typeof window.__murtherWsHook === 'undefined');
+        R.mode = (modeWas || 'reverse'); R.on = !!onWas;
+        try { delete window.__mxHook; } catch (e) {}
+        try { delete window.__mxHookCapture; } catch (e2) {}
+        out.ok = !!(out.stubSeen && out.autoReleased && out.releasedFreeze && out.releasedToggle &&
+                    out.releasedCycle && out.keptReset && out.releasedBinds === 3 &&
+                    out.danger && out.modeReported === 'freeze' &&
+                    out.repairWas === 'freeze' && out.repairedTo === 'reverse' &&
+                    out.trapGone && out.devtoolsGone && out.devguardGone && out.syncErrs === 0 &&
+                    out.stamped && out.ownerRecord === 'murther' && out.sharedFlagUntouched);
+        return out;
+      });
+  };
+  /* ---- menu pass check (v1.52.1) ------------------------------------------------------
+     The three editor panes gained a self-description, a CARD per feature row and a movable
+     category. This drives the REAL pane markup through the real code paths:
+
+       (a) PANE INTRO. Settings and Hotkeys now describe themselves above the search bar
+           (Themes already did). Asserted by POSITION, not by text: the intro is an element
+           child of the search bar's OWN parent and precedes it. The lookup is scoped to
+           the pane that is NOT .mx-hidden — Hotkeys and Themes wrap their categories in
+           .mx-theme-body while the bar lives in the outer pane in both cases.
+       (b) CARDS. A feature row directly inside its parent section carries the card styling
+           (a 2px accent in the category's colour is visibly different from the 1px
+           border elsewhere, plus a non-transparent background). A row nested one level
+           deeper — the note cards' own .mx-set-row action strips — is deliberately NOT
+           carded: a card inside a card is not a feature. The colour test is needed
+           because the shell carries zoom, so border widths are scaled and a px comparison
+           varies with the device.
+       (c) MOVE. A CLOSED category is dragged by its grip onto the other closed one: the DOM
+           reorders, the ARRANGEMENT IS WRITTEN TO THE SETTINGS STORE (which is what makes a
+           Backup carry it — the old open/closed flag lived only in localStorage), the moved
+           category is still closed, and order AND fold state both survive a pane rebuild.
+       (d) SEARCH. While a filter is active the grip is refused (draggable="false") or the
+           matching sections collapse entirely (filter hides rows with mx-hidden and the whole
+           section gets mx-hidden when nothing in it matches), because a filtered pane
+           holds only the matches — saving that would silently drop every hidden
+           category's position.
+
+     It captures the raw settings string first and restores it afterwards, and restores the DOM
+     arrangement and the fold state it borrowed, so running it on the real client leaves the
+     store byte-identical and the menu as it was. Order is re-applied PAIRWISE among sections
+     only, so a non-section sibling (the intro, the search bar) can never be displaced — that
+     was the old fixed-slot bug.
+       await __mxMenuCheck() -> { ok, panes, cards, moved, orderInStore, searchRefuses, ... }
+  ------------------------------------------------------------------------------------- */
+  window.__mxMenuCheck = function () {
+    var out = { ok: false, steps: [] };
+    var M = window.__murther;
+    if (!M || !M.openMenu || !M.closeMenu || !M.menu || !M.menuMove) return Promise.resolve({ ok: false, why: 'no __murther menu API' });
+    var LS = 'murther_settings_v1';
+    var raw = null; try { raw = localStorage.getItem(LS); } catch (e0) {}
+    var saved = M.menu();
+    M.openMenu();
+
+    function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+    function q(sel, root) { return (root || document).querySelector(sel); }
+    function all(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
+
+    /* Tabs: the shell also renders a ruler with .mx-tab clones for measurement — it has
+       aria-hidden and class mx-nav-ruler and lives inside .mx-left. A document-wide
+       ".mx-tabs .mx-tab" query hits those ghosts too when the ruler is populated, and
+       clicking a ghost has no handlers. Scope to the pane tabs (they are the ones that
+       carry role="tablist" and are NOT the ruler). */
+    function tab(name) {
+      var hit = null;
+      /* real tabs: the ruler also has role attributes (cloneNode(true)), but it is
+         aria-hidden="true" — the real bar has role="tablist" without aria-hidden */
+      var bars = all('[role="tablist"]').filter(function (b) { return b.getAttribute('aria-hidden') !== 'true' && !b.classList.contains('mx-nav-ruler'); });
+      var tabs = bars.length ? all('[role="tab"]', bars[0]) : all('.mx-left .mx-tabs:not(.mx-nav-ruler) .mx-tab');
+      tabs.forEach(function (b) {
+        var l = q('.mx-tab-lbl', b);
+        if (l && l.textContent.replace(/\s+/g, ' ').trim() === name) hit = b;
+      });
+      if (!hit) all('.mx-left .mx-tabs .mx-tab').forEach(function (b) { var l = q('.mx-tab-lbl', b); if (l && l.textContent.replace(/\s+/g, ' ').trim() === name) hit = b; });
+      if (hit) hit.click();
+      return !!hit;
+    }
+    function activeSearch() {
+      var cand = all('input.mx-settings-search, input.mx-theme-search');
+      for (var i = 0; i < cand.length; i++) {
+        var el = cand[i];
+        try { if (el.closest('.mx-hidden')) continue; } catch (e) { }
+        if (el.offsetParent !== null) return el;
+        // closest may not be available in very old builds; fall back to hidden-class ancestor walk
+        var p = el;
+        var hidden = false;
+        while (p && p.nodeType === 1) { if (p.classList && p.classList.contains('mx-hidden')) { hidden = true; break; } p = p.parentElement; }
+        if (!hidden) return el;
+      }
+      return cand[0] || null;
+    }
+    function host(pane) {
+      var s = q('.mx-tsec[data-mx-pane="' + pane + '"]');
+      return s ? s.parentNode : null;
+    }
+    function secs(pane) {
+      var h = host(pane);
+      return h ? all('.mx-tsec', h).filter(function (c) { return c.parentNode === h; }) : [];
+    }
+    function keys(pane) { return secs(pane).map(function (s) { return s.getAttribute('data-mx-key'); }); }
+    function introProbe() {
+      var s = activeSearch();
+      if (!s || !s.parentNode) return { ok: false, why: 'no active search box' };
+      var par = s.parentNode;
+      var idx = Array.prototype.indexOf.call(par.children, s);
+      var before = Array.prototype.slice.call(par.children, 0, idx).filter(function (c) { return /\bmx-kb-note\b/.test(c.className || ''); });
+      return { ok: before.length > 0, bar: (s.className || ''), parent: (par.className || '').slice(0, 40), barIdx: idx, beforeCount: before.length, total: par.children.length };
+    }
+    function cardProbe(pane, label) {
+      tab(label);
+      var row = document.querySelector('.mx-tsec[data-mx-pane="' + pane + '"] .mx-set-row, .mx-tsec[data-mx-pane="' + pane + '"] .mx-kb, .mx-tsec[data-mx-pane="' + pane + '"] .mx-trow');
+      if (!row) return { carded: false, why: 'no feature row found for ' + pane };
+      var cs = getComputedStyle(row);
+      // The shell carries zoom (e.g. 0.94), so widths are scaled and a literal "2px vs 1px"
+      // assertion is a false negative. The invariant is the COLOUR: the accent must be the
+      // category's own colour (from --mx-feature-*), visibly different from the generic border
+      // elsewhere on the row.
+      var accentEq = cs.borderLeftColor === cs.borderTopColor;
+      return { carded: !accentEq && cs.backgroundColor !== 'rgba(0, 0, 0, 0)',
+               left: cs.borderLeftWidth, leftColor: cs.borderLeftColor,
+               top: cs.borderTopWidth, topColor: cs.borderTopColor,
+               bg: cs.backgroundColor, cls: row.className };
+    }
+    function nestedProbe() {
+      var row = document.querySelector('.mx-kb-note .mx-set-row');
+      if (!row) return { skipped: true, why: 'no note-card row on this build' };
+      var cs = getComputedStyle(row);
+      return { skipped: false, bg: cs.backgroundColor, left: cs.borderLeftWidth, top: cs.borderTopWidth,
+               cls: row.className, carded: cs.backgroundColor !== 'rgba(0, 0, 0, 0)' };
+    }
+    function drag(from, to, where) {
+      var grip = q('.mx-tsec-grip', from);
+      if (!grip) return;
+      var r = to.getBoundingClientRect();
+      var y = where === 'after' ? r.top + Math.max(1, r.height - 1) : r.top + 1;
+      var dt = null; try { dt = new DataTransfer(); } catch (e1) {}
+      function fire(type, node) {
+        var e;
+        try { e = new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientY: y }); }
+        catch (e2) { e = new Event(type, { bubbles: true, cancelable: true }); }
+        node.dispatchEvent(e);
+      }
+      fire('dragstart', grip);
+      fire('dragover', to);
+      fire('drop', to);
+      fire('dragend', grip);
+    }
+    function restoreDOM(pane, want) {
+      var h = host(pane);
+      if (!h || !Array.isArray(want) || !want.length) return;
+      for (var i = want.length - 1; i >= 0; i--) {
+        var el = h.querySelector('.mx-tsec[data-mx-key="' + want[i] + '"]');
+        if (!el || el.parentNode !== h) continue;
+        var nxt = want[i + 1];
+        if (nxt) {
+          var ref = h.querySelector('.mx-tsec[data-mx-key="' + nxt + '"]');
+          if (ref && ref.parentNode === h && ref !== el) h.insertBefore(el, ref);
+        }
+      }
+      var last = want[want.length - 1];
+      if (last) { try { M.menuMove(pane, last, null); } catch (eM) {} }
+    }
+
+    var panesInfo = {}, borrowed = [], beenA = false, beenB = false, targetHeight0 = null;
+    return wait(520)
+      .then(function () {
+        tab('Settings'); return wait(360);
+      })
+      .then(function () {
+        panesInfo.settingsKeys = keys('settings');
+        var ip0 = introProbe();
+        panesInfo.settingsIntro = ip0;
+        var cp0 = cardProbe('settings', 'Settings');
+        panesInfo.settingsCard = cp0;
+        return wait(160);
+      })
+      .then(function () {
+        tab('Hotkeys'); return wait(360);
+      })
+      .then(function () {
+        panesInfo.hotkeysKeys = keys('hotkeys');
+        var ip1 = introProbe();
+        panesInfo.hotkeysIntro = ip1;
+        var cp1 = cardProbe('hotkeys', 'Hotkeys');
+        panesInfo.hotkeysCard = cp1;
+        panesInfo.nestedRow = nestedProbe();
+        panesInfo.nestedOk = !!panesInfo.nestedRow.skipped || !panesInfo.nestedRow.carded;
+        return wait(160);
+      })
+      .then(function () {
+        tab('Themes'); return wait(360);
+      })
+      .then(function () {
+        panesInfo.themesKeys = keys('themes');
+        var ip2 = introProbe();
+        panesInfo.themesIntro = ip2;
+        var cp2 = cardProbe('themes', 'Themes');
+        panesInfo.themesCard = cp2;
+        out.panes = panesInfo;
+        out.intro = !!(panesInfo.settingsIntro.ok && panesInfo.hotkeysIntro.ok && panesInfo.themesIntro.ok);
+        out.keysOk = !!(panesInfo.settingsKeys.length >= 3 && panesInfo.hotkeysKeys.length >= 3 && panesInfo.themesKeys.length >= 2);
+        /* v1.58.0: the Developer console category is removed for good - its key must
+         * never appear in the settings pane again. */
+        out.noDevtools = panesInfo.settingsKeys.indexOf('devtools') === -1;
+        function paneOk(p) { var list = secs(p); return list.length === all('.mx-tsec[data-mx-pane="' + p + '"]', host(p)).length &&
+          list.every(function (s) { return !!s.getAttribute('data-mx-key') && !!q('.mx-tsec-grip', s); }); }
+        out.keyedGripsOk = paneOk('settings') && paneOk('hotkeys') && paneOk('themes');
+        out.cards = { settings: panesInfo.settingsCard, hotkeys: panesInfo.hotkeysCard, themes: panesInfo.themesCard };
+        out.cardsOk = ['settings', 'hotkeys', 'themes'].every(function (p) { return panesInfo[p + 'Card'].carded; });
+        out.nestedRow = panesInfo.nestedRow;
+        out.nestedOk = panesInfo.nestedOk;
+        return wait(200);
+      })
+      .then(function () {
+        tab('Settings'); return wait(420);
+      })
+      .then(function () {
+        var list = secs('settings');
+        if (list.length < 3) { out.steps.push('too few settings categories'); return wait(60); }
+        out.before = keys('settings');
+        var a = list[list.length - 1], b = list[list.length - 2];
+        beenA = a.classList.contains('closed'); beenB = b.classList.contains('closed');
+        try { targetHeight0 = b.getBoundingClientRect().height; } catch (eR) { targetHeight0 = null; }
+        out.targetHeight = targetHeight0;
+        if (targetHeight0 === 0) out.steps.push('target had no layout box (pane not laid out — guard path, not proven here)');
+        if (!beenA) q('.mx-tsec-head', a).click();
+        if (!beenB) q('.mx-tsec-head', b).click();
+        out.closedPair = [a.classList.contains('closed'), b.classList.contains('closed')];
+        drag(a, b, 'before');
+        var after = keys('settings');
+        out.moved = after.indexOf(a.getAttribute('data-mx-key')) < after.indexOf(b.getAttribute('data-mx-key'));
+        out.movedKeyStaysClosed = a.classList.contains('closed');
+        var st = M.menu();
+        out.storeOrder = (st.order || {}).settings || null;
+        out.storeClosed = (st.closed || {}).settings || null;
+        out.orderInStore = Array.isArray(out.storeOrder) && out.storeOrder.join('|') === after.join('|');
+        out.closedInStore = !!(out.storeClosed && out.storeClosed[a.getAttribute('data-mx-key')] === true);
+        out.domAfterDrag = after;
+        borrowed.push({ el: a, was: beenA }, { el: b, was: beenB });
+        return wait(220);
+      })
+      .then(function () { tab('Themes'); return wait(420); })
+      .then(function () { tab('Settings'); return wait(420); })
+      .then(function () {
+        out.afterRebuild = keys('settings');
+        out.orderSurvived = !!(out.storeOrder && out.afterRebuild.join('|') === out.storeOrder.join('|'));
+        var movedKey = out.before[out.before.length - 1];
+        var movedEl = document.querySelector('.mx-tsec[data-mx-pane="settings"][data-mx-key="' + movedKey + '"]');
+        out.closedSurvived = !!(movedEl && movedEl.classList.contains('closed'));
+        var s = activeSearch();
+        out.searchSeen = !!s;
+        out.searchWas = s ? (s.className || '') : null;
+        if (s) { s.value = 'zzzzz'; s.dispatchEvent(new Event('input', { bubbles: true })); }
+        return wait(420);
+      })
+      .then(function () {
+        var list = secs('settings');
+        var grips = list.map(function (x) { var g = q('.mx-tsec-grip', x); return g ? g.getAttribute('draggable') : null; });
+        var hiddens = list.map(function (x) { return x.classList.contains('mx-hidden'); });
+        out.search = { sections: list.length, grips: grips, hiddens: hiddens, activeClass: (activeSearch() && activeSearch().className) || null };
+        // Settings' filter hides rows with mx-hidden; a non-matching query makes every
+        // section's rows hidden and the section itself gets mx-hidden (plus its grip's head
+        // display becomes none). That IS the "refused" state for Settings. Themes and Hotkeys
+        // instead rebuild with forceOpen and mark the grip draggable="false".
+        var allGripsOff = list.length === 0 ? grips.length === 0 : grips.every(function (d) { return d === 'false'; });
+        var allHidden = list.length > 0 && hiddens.every(function (h) { return !!h; });
+        out.searchRefuses = allGripsOff || allHidden;
+        var s = activeSearch();
+        if (s) { s.value = ''; s.dispatchEvent(new Event('input', { bubbles: true })); }
+        return wait(420);
+      })
+      .then(function () {
+        ['settings', 'hotkeys', 'themes'].forEach(function (pane) {
+          var want = (saved.order || {})[pane];
+          if (!Array.isArray(want) || !want.length) return;
+          restoreDOM(pane, want);
+        });
+        borrowed.forEach(function (b) {
+          if (!b.el.isConnected) return;
+          if (b.el.classList.contains('closed') !== b.was) {
+            var hd = q('.mx-tsec-head', b.el);
+            if (hd) hd.click();
+          }
+        });
+        if (raw === null) { try { localStorage.removeItem(LS); } catch (eR) {} }
+        else { try { localStorage.setItem(LS, raw); } catch (eR2) {} }
+        out.restored = 'store string put back; pairwise DOM + fold-state restored';
+        out.restoredNote = 'in-memory layout still holds the dragged arrangement until reload — which is why the harness is a throwaway page';
+        M.closeMenu();
+        out.ok = !!(out.intro && out.keysOk && out.noDevtools && out.keyedGripsOk && out.cardsOk && out.nestedOk &&
+                    out.closedPair && out.closedPair[0] && out.closedPair[1] && out.moved &&
+                    out.movedKeyStaysClosed && out.targetHeight > 0 && out.orderInStore &&
+                    out.closedInStore && out.orderSurvived && out.closedSurvived && out.searchRefuses);
+        try { console.log('[murther] menu check', out); } catch (eL) {}
+        return out;
+      });
+  };
+  /* ---- menu size check (v1.58.0) ------------------------------------------------------
+     The right card must keep ONE size on every tab and match the left card, in both
+     the row menu and the stacked-nav / compact layouts. Walks all six tabs and reads
+     layout boxes (offsetHeight: layout pixels, so the menu's own zoom/scale cannot
+     fake equality). Asserts, ±1px:
+       - right card height identical on every tab (the reported bug: it resized per tab)
+       - menu height identical on every tab (no jump/recenter when switching)
+       - menu screen position identical on every tab
+       - in row direction, left and right cards equal on every tab
+     Side-effect free except the active tab: no store writes, menu state restored.
+     await __mxMenuSizeCheck() -> { ok, layout, tabs, heights, problems } */
+  window.__mxMenuSizeCheck = function () {
+    var out = { ok: false, problems: [], tabs: {} };
+    var M = window.__murther;
+    if (!M || !M.openMenu || !M.closeMenu) return Promise.resolve({ ok: false, why: 'no __murther menu API' });
+    function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+    function all(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
+    function q(sel, root) { return (root || document).querySelector(sel); }
+    function tab(name) {
+      var hit = null;
+      var bars = all('[role="tablist"]').filter(function (b) { return b.getAttribute('aria-hidden') !== 'true' && !b.classList.contains('mx-nav-ruler'); });
+      var tabs = bars.length ? all('[role="tab"]', bars[0]) : all('.mx-left .mx-tabs:not(.mx-nav-ruler) .mx-tab');
+      tabs.forEach(function (b) {
+        var l = q('.mx-tab-lbl', b);
+        if (l && l.textContent.replace(/\s+/g, ' ').trim() === name) hit = b;
+      });
+      if (hit) hit.click();
+      return !!hit;
+    }
+    function activeTab() {
+      var cur = q('.mx-left .mx-tab.active .mx-tab-lbl') || q('.mx-tab.active .mx-tab-lbl');
+      return cur ? cur.textContent.replace(/\s+/g, ' ').trim() : null;
+    }
+    var labels = ['Servers', 'Settings', 'Hotkeys', 'Themes', 'OtoRev', 'Backup'];
+    var first = activeTab();
+    M.openMenu();
+    function box() {
+      var menu = q('#murther-root .mx-menu') || q('.mx-menu');
+      if (!menu) return null;
+      var left = q('.mx-left', menu), right = q('.mx-right', menu);
+      var r = menu.getBoundingClientRect();
+      return {
+        dir: (function () { try { return getComputedStyle(menu).flexDirection; } catch (e) { return '?'; } })(),
+        menuH: menu.offsetHeight, leftH: left ? left.offsetHeight : -1, rightH: right ? right.offsetHeight : -1,
+        x: Math.round(r.left * 10) / 10, y: Math.round(r.top * 10) / 10
+      };
+    }
+    return wait(420).then(function step(i) {
+      i = i || 0;
+      if (i >= labels.length) {
+        var names = Object.keys(out.tabs);
+        var rhs = names.map(function (n) { return out.tabs[n].rightH; });
+        var mhs = names.map(function (n) { return out.tabs[n].menuH; });
+        var xs = names.map(function (n) { return out.tabs[n].x; });
+        var ys = names.map(function (n) { return out.tabs[n].y; });
+        function spread(a) { return Math.max.apply(null, a) - Math.min.apply(null, a); }
+        out.layout = names.length ? out.tabs[names[0]].dir : '?';
+        if (names.length < labels.length) out.problems.push('only ' + names.length + '/' + labels.length + ' tabs measurable');
+        if (spread(rhs) > 1) out.problems.push('right card height moves per tab: ' + JSON.stringify(out.tabs));
+        if (spread(mhs) > 1) out.problems.push('menu height moves per tab: ' + JSON.stringify(out.tabs));
+        if (spread(xs) > 1 || spread(ys) > 1) out.problems.push('menu screen position moves per tab');
+        if (/row/.test(out.layout || '')) {
+          names.forEach(function (n) {
+            if (Math.abs(out.tabs[n].leftH - out.tabs[n].rightH) > 1)
+              out.problems.push(n + ': cards unequal (left ' + out.tabs[n].leftH + ' vs right ' + out.tabs[n].rightH + ')');
+          });
+        }
+        if (first) tab(first);
+        M.closeMenu();
+        out.ok = out.problems.length === 0;
+        try { console.log('[murther] menu size check', out); } catch (eL) {}
+        return out;
+      }
+      if (!tab(labels[i])) {
+        out.problems.push('tab not found: ' + labels[i]);
+        return step(i + 1);
+      }
+      return wait(360).then(function () {
+        var b = box();
+        if (!b) out.problems.push('no menu box on ' + labels[i]);
+        else out.tabs[labels[i]] = b;
+        return step(i + 1);
+      });
+    });
+  };
+
+  window.__mxLb = {
+    order: function () { return names.slice(); },
+    swap: function (i, j) {
+      if (i < 0 || j < 0 || i >= names.length || j >= names.length || i === j) return false;
+      var a = names[i]; names[i] = names[j]; names[j] = a;
+      var m = massSeed[i]; massSeed[i] = massSeed[j]; massSeed[j] = m;
+      drawLB();
+      return true;
+    },
+    drop: function (i) { i = (typeof i === 'number') ? i : names.indexOf('Murther'); return window.__mxLb.swap(i, i + 1); },
+    gain: function (i) { i = (typeof i === 'number') ? i : names.indexOf('Murther'); return window.__mxLb.swap(i, i - 1); }
+  };
+
+  // minimap canvas
+  var mm=document.getElementById('minimap-canvas'), mmc=mm.getContext('2d');
+  var blobs=[]; for(var i=0;i<26;i++) blobs.push({x:Math.random()*360,y:Math.random()*360,r:3+Math.random()*8,c:'hsl('+Math.round(Math.random()*360)+',70%,60%)'});
+  function drawMM(){
+    mmc.clearRect(0,0,mm.width,mm.height);
+    mmc.strokeStyle='rgba(255,255,255,.06)';
+    for(var g=0;g<=360;g+=45){mmc.beginPath();mmc.moveTo(g,0);mmc.lineTo(g,360);mmc.stroke();mmc.beginPath();mmc.moveTo(0,g);mmc.lineTo(360,g);mmc.stroke();}
+    blobs.forEach(function(b){
+      b.x+= (Math.random()-.5)*2; b.y+=(Math.random()-.5)*2;
+      b.x=Math.max(6,Math.min(354,b.x)); b.y=Math.max(6,Math.min(354,b.y));
+      mmc.fillStyle=b.c; mmc.beginPath(); mmc.arc(b.x,b.y,b.r,0,7); mmc.fill();
+    });
+    /* v1.41.1 (parity with preview.html): the map draws the players in WORLD units through
+     * a world->minimap matrix, and the game's coordinates are those same units. */
+    mmc.setTransform(0.1, 0, 0, 0.1, 0, 0);
+    var sx=180+Math.sin(Date.now()/1400)*70, sy=180+Math.cos(Date.now()/1700)*70;
+    mmc.fillStyle='#fff'; mmc.beginPath(); mmc.arc(sx*10,sy*10,60,0,7); mmc.fill();
+    mmc.fillStyle='#e8e8f0'; mmc.font='700 130px Verdana, sans-serif'; mmc.textAlign='center';
+    mmc.fillText('Murther', sx*10, sy*10-150);
+    mmc.setTransform(1,0,0,1,0,0);
+    document.getElementById('minimap-coordinates').textContent='x:'+Math.round(sx*10)+' y:'+Math.round(sy*10);
+  }
+
+  // chat simulation
+  var chatNames=['nyx','Reicon','Cal','Moncler','Myc 玄 ⟐','Julius','Sai 赛','Sameru'];
+  var chatLines=['anyone ffa?','gg wp','party? invite pls','he is tracing','lol','splitrunning is fun','team?','brb food','this server is dead','nice one'];
+  var tb=document.getElementById('chat-tbody');
+  function addChat(name,msg){
+    var tr=document.createElement('tr'), td=document.createElement('td');
+    td.innerHTML='<b style="color:#9db4ff">'+name+':</b> '+msg;
+    tr.appendChild(td); tb.appendChild(tr);
+    var cc=document.getElementById('chat-container'); cc.scrollTop=cc.scrollHeight;
+  }
+  addChat('nyx','hello world');
+  addChat('Murther','murther client running');
+
+  // native score updates
+  var mass=0,score=0,cells=0;
+  function tick(){
+    drawLB(); drawMM();
+    if(Math.random()<.35){
+      mass=Math.round(mass+(Math.random()*400-180)); mass=Math.max(0,mass);
+      score=mass*13; cells=Math.max(1,Math.round(mass/420)||1);
+      document.getElementById('sc-mass').textContent=mass;
+      document.getElementById('sc-score').textContent=score;
+      document.getElementById('sc-cells').textContent=cells+'/16';
+    }
+    // v1.43.0: the footer has THREE columns (Reset / Time / Spec) - the respawn row is still
+    // written because the parser needs it as a stop label. Every lookup is null-guarded:
+    // __mxFootCheck flattens this stub to one text node on purpose, which removes the spans
+    // mid-tick and used to throw here.
+    var ping=document.getElementById('extra-ping'); if(ping) ping.textContent=60+Math.round(Math.random()*90);
+    var sec=Math.floor(Date.now()/1000);
+    var er=document.getElementById('extra-reset'); if(er) er.textContent=(Math.floor(sec/60)%60)+':'+('0'+(sec%60)).slice(-2);
+    var ers=document.getElementById('extra-respawn'); if(ers) ers.textContent=(Math.round(Math.random()*4))+":"+('0'+Math.floor(Math.random()*60)).slice(-2);
+    var esp=document.getElementById('extra-spec'); if(esp) esp.textContent=Math.round(Math.random()*6);
+    if(Math.random()<.2) addChat(chatNames[Math.floor(Math.random()*chatNames.length)],chatLines[Math.floor(Math.random()*chatLines.length)]);
+  }
+  setInterval(tick,500);
+
+  // native play/spec buttons: fake "join game" => hide menu
+  document.getElementById('btn-play').addEventListener('click',function(){
+    document.getElementById('main').style.display='none';
+    document.getElementById('extra-server').textContent='EU #1 — in game';
+  });
+  document.getElementById('btn-spec').addEventListener('click',function(){
+    document.getElementById('main').style.display='none';
+  });
+
+  // canvas paint so blur looks right
+  var c=document.getElementById('canvas'), ctx=c.getContext('2d');
+  function paint(){ c.width=innerWidth; c.height=innerHeight;
+    var g=ctx.createRadialGradient(c.width*.3,c.height*.3,50,c.width*.3,c.height*.3,700);
+    g.addColorStop(0,'#1a2030'); g.addColorStop(1,'#10131c');
+    ctx.fillStyle=g; ctx.fillRect(0,0,c.width,c.height);
+    ctx.strokeStyle='rgba(255,255,255,.03)';
+    for(var x=0;x<c.width;x+=60){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,c.height);ctx.stroke();}
+    for(var y=0;y<c.height;y+=60){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(c.width,y);ctx.stroke();}
+  }
+  paint(); addEventListener('resize',paint);
+
+  /* ---------- v1.55.0: ARENA 2D TEXT fixture ----------
+   * The client's fillText scene source reads the ARENA canvas's own text, and nothing in
+   * this fixture ever produced any: #canvas was painted with a gradient and grid lines only.
+   * This pass models what the engine does when it resolves to a 2D renderer - it sets its
+   * camera transform once and then draws each player's nick and mass in WORLD coordinates -
+   * so the fallback scene, the probe counts and the OtoRev cursor pick are all exercisable
+   * in the Preview tab instead of only on the live page. The camera drifts, so a label's
+   * world coordinates stay where they are while its screen position moves: that is exactly
+   * what makes the two coordinate forms of one label distinguishable. Names are stroked and
+   * then filled, like the game does, to exercise the client's duplicate filter.
+   * window.__mxFakeArena.off() turns the pass off, so the "no source at all" path (and the
+   * strip's refusal to keep a value) stays testable too. */
+  var arena = { on: true, zoom: 0.6, players: [
+    { name: 'Murther', mass: 8420, wx: -260, wy: 40 },
+    { name: 'nyx', mass: 5210, wx: 640, wy: -380 },
+    { name: 'Sai 赛', mass: 2130, wx: 1180, wy: 520 }
+  ] };
+  function arenaCamera () {
+    var t = Date.now() / 60 % 3000;               // world units the camera has travelled
+    return { x: t, y: t * 0.35 };
+  }
+  function arenaDraw () {
+    if (!arena.on) return;
+    paint();                                       // the repaint is also the clear
+    var cam = arenaCamera(), z = arena.zoom;
+    ctx.setTransform(z, 0, 0, z, c.width / 2 - cam.x * z, c.height / 2 - cam.y * z);
+    arena.players.forEach(function (p) {
+      p.wx += (Math.random() - .5) * 6;             // drift, so a label is never frozen
+      p.wy += (Math.random() - .5) * 6;
+      ctx.beginPath(); ctx.arc(p.wx, p.wy, 90, 0, 7);
+      ctx.fillStyle = 'hsl(' + Math.round(Math.abs(p.wx) % 360) + ',60%,55%)'; ctx.fill();
+      ctx.font = '700 40px Verdana, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.lineWidth = 6; ctx.strokeStyle = 'rgba(0,0,0,.7)';
+      ctx.strokeText(p.name, p.wx, p.wy - 110);
+      ctx.fillStyle = '#fff';
+      ctx.fillText(p.name, p.wx, p.wy - 110);      // stroke + fill of ONE label (the dedupe case)
+      ctx.font = '700 34px Verdana, sans-serif';
+      ctx.fillStyle = '#cfe0ff';
+      ctx.fillText(String(p.mass), p.wx, p.wy - 40);   // the number drawn beside it
+    });
+    ctx.setTransform(1, 0, 0, 1, 0, 0);            // leave the context exactly as we found it
+  }
+  setInterval(arenaDraw, 40);
+  window.__mxFakeArena = {
+    on: function (v) { arena.on = v !== false; return arena.on; },
+    players: function () { return arena.players.map(function (p) { return { name: p.name, mass: p.mass, x: Math.round(p.wx), y: Math.round(p.wy) }; }); },
+    camera: arenaCamera
+  };
+
+  /* ---------- keyboard lockout fixture (models the real page's input handling) ----------
+   * Game Files/main.js wires focusin/focusout on <document> and reads e.target.tagName; a
+   * focused text field makes the game ignore EVERY gameplay key. Chrome does not fire
+   * focusout when the focused element is removed, and a field parked off-screen keeps
+   * focus — both leave that "typing" flag stuck on with nothing on screen to explain it.
+   * These three buttons reproduce each shape so the guard can be checked for real. */
+  var fakeKeys = 0, fakeTyping = false, idBoxHome = null;
+  document.addEventListener('focusin', function (e) {
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) fakeTyping = true;
+  }, true);
+  document.addEventListener('focusout', function (e) {
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) fakeTyping = false;
+  }, true);
+  // the engine's own check, exactly as the page runs it: a focused text field means
+  // "you are typing", so the gameplay key is dropped. fakeTyping models the sticky-flag
+  // variety on top (it is driven by focusin/focusout, and stays on if a focusout is
+  // never delivered — e.g. a field hidden under the player's feet).
+  function typedInto() {
+    var a = document.activeElement;
+    return !!(a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable));
+  }
+  window.addEventListener('keydown', function (e) {
+    if (e.__murtherKeyRelease) return;            // the guard's own bookkeeping, not gameplay
+    if (fakeTyping || typedInto()) return;        // "typing": the game swallows the key
+    fakeKeys++;
+    var k = document.getElementById('fake-keys');
+    if (k) k.textContent = String(fakeKeys);
+  });
+  window.__mxFakeGame = {
+    keys: function () { return fakeKeys; },
+    typing: function () { return fakeTyping; },
+    reset: function () { fakeKeys = 0; fakeTyping = false; fakeStatus(''); }
+  };
+  function fakeStatus(msg) { var s = document.getElementById('fake-status'); if (s) s.textContent = msg; }
+  function idBox() {
+    var i = document.getElementById('id-box');
+    if (i) { idBoxHome = idBoxHome || i.parentNode; return i; }
+    if (!idBoxHome) return null;
+    i = document.createElement('input');
+    i.id = 'id-box'; i.placeholder = 'Tag'; i.value = '[MX]';
+    idBoxHome.appendChild(i);
+    return i;
+  }
+  window.__mxFakeLock = {
+    // the shape that sticks: a focused field is removed, so no focusout is ever fired
+    removed: function () { var i = idBox(); if (!i) return false; i.focus(); i.remove(); fakeStatus('field removed while focused — typing flag stuck ON'); return true; },
+    // a field hidden under the player's feet keeps focus
+    hidden: function () { var i = idBox(); if (!i) return false; i.focus(); i.style.display = 'none'; fakeStatus('field hidden while focused'); return true; },
+    /* The shape the real client actually hits: the game shows its own menu, which
+     * Murther parks with position:fixed; left:-99999px; opacity:0 — #main keeps
+     * display:block, so the game's own focus() on #name-box / #id-box lands on a field
+     * that is focused, off-screen and invisible. The engine's typing flag is set and
+     * every key is swallowed with nothing on screen to explain it. */
+    parked: function () {
+      var i = document.getElementById('fake-parked-input');
+      var m = document.getElementById('fake-parked');
+      if (!i || !m) return false;
+      i.focus();
+      fakeStatus('game focused an off-screen (opacity 0) field — keys are dead');
+      return true;
+    },
+    restore: function () {
+      var i = idBox(); var m = document.getElementById('main');
+      var p = document.getElementById('fake-parked-input');
+      if (i) i.style.display = '';
+      if (m) m.classList.remove('mx-ghost');
+      if (p) try { p.blur(); } catch (e) {}
+      if (idBoxHome && (!i || !i.isConnected)) idBoxHome.appendChild(i || idBox());
+      fakeStatus('');
+    }
+  };
+  setInterval(function () {
+    var t = document.getElementById('fake-typing');
+    if (t) { t.textContent = fakeTyping ? 'STUCK ON' : 'off'; t.style.color = fakeTyping ? '#ff7474' : '#8f8ba0'; }
+    var g = document.getElementById('fake-guard');
+    if (g) { try { var r = window.__MX_KEYS__ ? window.__MX_KEYS__.state() : null; g.textContent = r ? ('guard: ' + r.focused + ' · repairs ' + r.repairs + (r.last ? ' · ' + r.last : '')) : 'guard: (not loaded)'; } catch (e) {} }
+  }, 500);
+})();
+</script>
+
+<div id="fake-parked" style="position:fixed!important;left:-99999px!important;top:0!important;opacity:0!important;pointer-events:none!important;z-index:-1!important"><input id="fake-parked-input" placeholder="parked field"></div>
+
+<div id="mx-test-kb" style="position:fixed;left:8px;top:8px;z-index:2147483602;background:#0d0d14;border:1px solid #3a3a4a;border-radius:8px;padding:8px 10px;font:11px/1.6 monospace;color:#cfcfe0;max-width:320px">
+  <b style="color:#f5b53a">keyboard lockout fixture</b><br>
+  game keys seen: <span id="fake-keys">0</span> · engine typing flag: <span id="fake-typing">off</span><br>
+  <button id="fake-lock-removed" style="font:10px monospace;margin-right:3px">field removed while focused</button>
+  <button id="fake-lock-hidden" style="font:10px monospace;margin-right:3px">field hidden</button>
+  <button id="fake-lock-parked" style="font:10px monospace;margin-right:3px">parked menu</button>
+  <button id="fake-reset" style="font:10px monospace">reset</button><br>
+  <button id="fake-chat-fresh" style="font:10px monospace;margin-right:3px">fresh visit (chat hidden)</button>
+  <button id="fake-chat-release" style="font:10px monospace">release chat</button><br>
+  <span id="fake-chat-state" style="color:#8f8ba0"></span><br>
+  <span id="fake-status" style="color:#8f8ba0"></span><br>
+  <span id="fake-guard" style="color:#8f8ba0;word-break:break-word"></span>
+</div>
+<script>
+(function () {
+  function bind(id, fn) { var b = document.getElementById(id); if (b) b.addEventListener('click', fn); }
+  bind('fake-lock-removed', function () { window.__mxFakeLock.removed(); });
+  bind('fake-lock-hidden', function () { window.__mxFakeLock.hidden(); });
+  bind('fake-lock-parked', function () { window.__mxFakeLock.parked(); });
+  bind('fake-reset', function () { window.__mxFakeLock.restore(); window.__mxFakeGame.reset(); });
+  // v1.36.0: the native reset timer counts down and the spectator count moves, so the
+  // mirrored leaderboard footer has to follow it (a frozen copy would be obvious here).
+  var resetSecs = 151, specN = 3;
+  setInterval(function () {
+    resetSecs = resetSecs > 0 ? resetSecs - 1 : 180;
+    var r = document.getElementById('extra-reset');
+    if (r) r.textContent = Math.floor(resetSecs / 60) + ':' + ('0' + (resetSecs % 60)).slice(-2);
+    var sp = document.getElementById('extra-spec');
+    if (sp) { specN = specN + (Math.random() < 0.25 ? (Math.random() < 0.5 ? -1 : 1) : 0); if (specN < 0) specN = 0; sp.textContent = String(specN); }
+    var st = document.getElementById('fake-chat-state');
+    if (st) st.textContent = 'chat-first: ' + document.body.classList.contains('mx-chat-first') + ' · chat hidden: ' + !!(document.querySelector('.mx-chat') && getComputedStyle(document.querySelector('.mx-chat')).display === 'none');
+  }, 1000);
+  bind('fake-chat-fresh', function () { try { sessionStorage.removeItem('murther_chat_released'); } catch (e) {} location.reload(); });
+  bind('fake-chat-release', function () { try { sessionStorage.setItem('murther_chat_released', '1'); } catch (e) {} location.reload(); });
+})();
+</script>
+
+<!-- v1.38.0: the native Appearance / Theme editor stubs plus the hosted-panel cockpit.
+     Kept in one shared file so the preview page and this harness cannot diverge. -->
+<script src="panels-fixture.js"></script>
+
+<!-- v1.57.0: ENGINE + SOCKET fixture. Two things the client now reports had no fixture at
+     all. (a) Pixi's dev hooks: the engine's bundle calls __PIXI_APP_INIT__ /
+     __PIXI_RENDERER_INIT__ with the version as the SECOND argument, and the client's engine
+     line, its Performance rows and __murther.pixi() read exactly that - so
+     window.__mxEngine.fire() drives them with a realistic renderer/app pair. (b) The GAME
+     SOCKET: the connection lifecycle only ever printed on the live page. A stub WebSocket is
+     installed BEFORE the client loads (its wrapper takes whatever window.WebSocket is at
+     document-start), so open/close/error can be produced by hand. fire() is never called on
+     load - the page's default state stays exactly as it was, so every existing fixture keeps
+     testing what it was written to test - and window.__mxEngine.reset() hands a fired app
+     back, so the fillText-source tests stay meaningful afterwards. -->
+<script>
+(function () {
+  /* ---- one stub WebSocket: the client wraps this constructor, so the instances created
+     through `new WebSocket(...)` below are what its wrapper returns, which means its
+     listeners are the ones these events reach. ---- */
+  var made = [];
+  function StubWS(url, protocols) {
+    this.url = String(url == null ? '' : url);
+    this.readyState = 0;
+    this.binaryType = '';
+    this._ls = { open: [], close: [], error: [], message: [] };
+    made.push(this);
+  }
+  StubWS.prototype.send = function () {};
+  StubWS.prototype.close = function () {};
+  StubWS.prototype.addEventListener = function (t, fn) { if (this._ls[t]) this._ls[t].push(fn); };
+  StubWS.prototype.removeEventListener = function () {};
+  StubWS.CONNECTING = 0; StubWS.OPEN = 1; StubWS.CLOSING = 2; StubWS.CLOSED = 3;
+  try { window.WebSocket = StubWS; } catch (e) {}
+  function emit(ws, type, ev) {
+    var ls = (ws && ws._ls[type]) || [], i;
+    for (i = 0; i < ls.length; i++) { try { ls[i](ev); } catch (e) {} }
+    return ls.length;
+  }
+  window.__mxEngine = {
+    fire: function (o) {
+      o = o || {};
+      var cv = document.getElementById('canvas');
+      var renderer = {
+        name: o.name || 'WebGLRenderer', type: o.type || 'webgl', canvas: cv,
+        context: { webGLVersion: o.gl === undefined ? 2 : o.gl },
+        resolution: 1, autoDensity: true,
+        resize: function () {}, render: function () {}
+      };
+      var app = {
+        renderer: renderer, canvas: cv,
+        stage: { position: { x: 0, y: 0, set: function (x, y) { this.x = x; this.y = y; } }, children: [] },
+        ticker: { maxFPS: 0, add: function () {}, remove: function () {} },
+        screen: cv ? { width: cv.width, height: cv.height } : { width: 0, height: 0 }
+      };
+      var version = o.version || '8.19.0';
+      try { if (typeof globalThis.__PIXI_RENDERER_INIT__ === 'function') globalThis.__PIXI_RENDERER_INIT__(renderer, version); } catch (e) {}
+      try { if (typeof globalThis.__PIXI_APP_INIT__ === 'function') globalThis.__PIXI_APP_INIT__(app, version); } catch (e2) {}
+      return { version: version, renderer: renderer.name, type: renderer.type, canvas: !!cv };
+    },
+    fired: function () { return { app: !!window.__murtherPixiApp, renderer: !!window.__murtherRenderer }; },
+    reset: function () {
+      try { delete window.__murtherPixiApp; } catch (e) {}
+      try { delete window.__murtherRenderer; } catch (e2) {}
+      return window.__murtherPixiApp;
+    },
+    socket: function (url) {
+      var ws = new WebSocket(url || 'wss://fixture.game/play');
+      var rec = ws.__mxSocket || null;               // the client tags the socket it wrapped
+      return {
+        url: ws.url, game: rec ? !!rec.game : null, rec: rec,
+        opened: function () { ws.readyState = 1; return emit(ws, 'open', {}); },
+        closed: function (code, reason) {
+          ws.readyState = 3;
+          return emit(ws, 'close', { code: code === undefined ? 1006 : code, reason: reason === undefined ? 'Keepalive timeout' : reason, wasClean: false });
+        },
+        erred: function () { return emit(ws, 'error', {}); },
+        message: function (data) { return emit(ws, 'message', { data: data || new ArrayBuffer(0) }); }
+      };
+    },
+    sockets: function () { return made.length; }
+  };
+})();
+</script>
+
+<!-- The Murther userscript itself, loaded inline for local preview -->
+<script src="../murther.user.js"></script>
+</body>
+</html>
