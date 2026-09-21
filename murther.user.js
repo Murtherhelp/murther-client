@@ -3239,7 +3239,19 @@ else if (typeof define === 'function' && define['amd'])
      * independent of the live P/M key letters (display-only, C1 rule). */
     var COUNT_MODE = { 1: '1x', 4: '4x', 8: '8x', 16: '16x', 32: '64x', 64: '64x' };
     var MODE_ARKEY = { '1x': 1, '4x': 2, '8x': 3, '16x': 4, '64x': 5, 'solo64x': 6 };
-    function diag(m) { try { if (typeof mxDiag === 'function') mxDiag(m); } catch (e) {} }
+    /* Fix round 1b: the global Diagnostics logging row was removed in v1.63.1
+     * and load() hard-wires diagLog off, so mxDiag alone can never show brain
+     * lines. The Auto Reverse panel's own Verbose (console) toggle is the live
+     * door: when it is on, brain transitions print to console directly (same
+     * convention as fireTrigger's verbose line). mxDiag stays as fallback. */
+    function diag(m) {
+      try {
+        var v = false;
+        try { var h = window.__murtherAutoReverse; v = !!(h && h.state && h.state.verbose); } catch (eV) {}
+        if (v) { try { console.log('[auto-reverse core] ' + m); } catch (eC) {} return; }
+        if (typeof mxDiag === 'function') mxDiag(m);
+      } catch (e) {}
+    }
     /* Step 5 completion: brain transitions go to Betix (record) as well as the
      * console path. Failure-silent by construction (see MX_BETIX). */
     function betix(level, msg, data) { try { MX_BETIX.log(level, msg, data); } catch (e) {} }
