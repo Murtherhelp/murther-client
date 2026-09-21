@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Murther — gota.io client
 // @namespace    murther.gota
-// @version      1.74.12
+// @version      1.74.13
 // @description  Murther - a full UI/UX replacement client for play.gota.io: a dark purple theme and a HUD reskin that HOSTS the live native panels (stats ID/Mass/Score/Cells top-centre, FPS/ping/server above the chat, leaderboard top-right, minimap, party, chat) so everything stays synced with the game; a native-synced server list with a verified pick -> join handshake; a clean name/mass leaderboard with an animated border that highlights your own row; searchable settings, themes and a full backup; client hotkeys with live write-through rebinding, chat macros and game-side action keys; and real performance controls (FPS cap / vsync governor, renderer resolution, reduce effects). A self-healing HUD keeps it honest: a state that would leave every panel hidden is reset once, with a toast, instead of blanking the screen. Feature rows explain themselves behind their own arrow (click it) instead of on hover - a category header is the only hover description left; the number on a category header is the real count of rows it is showing; Themes opens with Enable Custom Theme, which switches the client's whole custom look off and says so; Play and Spectate wear an animated white outline; and the profile card's particle field is fitted to the real device pixels, reacts to the pointer and demotes itself when frames get slow.
 // @description  Every release note and the full behavioural history live in the RELEASE HISTORY block below the header - the metadata above carries only the current feature set, so it can never go stale or outgrow a userscript manager's UI.
 // @author       Murther
@@ -827,7 +827,14 @@
 // Genuine refreshes (regions agree, list empty) still keep the old rows, and
 // __murther.serverCheck() now reports pill vs native region, per-tab keys and
 // fresh-vs-cached container identity, so one paste answers 'why' next time.
-// v1.74.12: fix round 2-equivalent in one place — the brain can neither arm
+// v1.74.13: fix round 3 — the press-arm reversal broke the acquisition chain
+// (locks were only born in fireTrigger/inspect, both bypassed by the new press
+// path, so lockName sat stale-or-empty and both arm paths died silently).
+// acquireLock is now exported on the module handle; bind presses acquire fresh
+// before arming (with a "no target locked" console note on failure), and the
+// pump acquires when Auto-Trigger finds no lock. The console block also gains
+// lock/deny fields so a silent no-arm names its reason.
+//
 // nor stay armed while the master switch is off. A bind press with the master
 // off goes straight to the stock fanout (never touches the core), and the
 // pump disarms a latched core before respecting the switch. This closes the
@@ -2790,11 +2797,15 @@
         errors: state.errors, fanoutFrames: state.fanoutFrames || 0, opHistogram: JSON.parse(JSON.stringify(state.opHistogram))
       };
     }
-    try { window.__murtherAutoReverse = { configure: configure, inspect: inspect, report: report, state: state, fireTrigger: fireTrigger, snapshot: snapshot }; } catch (e) {}
+    /* Fix round 3: the press-arm reversal broke the acquisition chain — locks were
+     * only ever created by fireTrigger({aim:true}) and inspect()-on-split, both
+     * of which the new press path bypasses. Export acquireLock so the brain can
+     * acquire fresh before arming instead of reading a stale/empty lockName. */
+    try { window.__murtherAutoReverse = { configure: configure, inspect: inspect, report: report, state: state, fireTrigger: fireTrigger, snapshot: snapshot, acquireLock: acquireLock }; } catch (e) {}
     /* Step 5 compat: the pre-rename handle. Persisted keys stay 'otorev*'; this alias
      * lets any external probe using the old name keep working. */
     try { window.__murtherOtoRev = window.__murtherAutoReverse; } catch (eAlias) {}
-    return { configure: configure, inspect: inspect, report: report, state: state, fireTrigger: fireTrigger, snapshot: snapshot };
+    return { configure: configure, inspect: inspect, report: report, state: state, fireTrigger: fireTrigger, snapshot: snapshot, acquireLock: acquireLock };
   })();
 
   /* ============================== v1.31.0 MXNET ==============================
@@ -3236,7 +3247,7 @@ else if (typeof define === 'function' && define['amd'])
     var READY = false, MOD = null, F = {};
     var CELL_SZ = 24; // sizeof(Cell): u32 id, u32 owner, f32 x, f32 y, f32 r, u8 me + 3 pad
     var cellPtr = 0, cellCap = 0, outPtr = 0;
-    var armedAt = 0, lastArmedKey = 0, lastEndAt = 0, noBinLogged = false;
+    var armedAt = 0, lastArmedKey = 0, lastEndAt = 0, lastDeny = '', noBinLogged = false;
     /* Fix round 1: REARM_COOLDOWN_MS. Expiry used to re-arm on the very next
      * 100 ms pump while a lock lived, holding tick-reversal ~permanently and
      * freezing the cell. Auto-arm now waits this long after any window end. */
@@ -3283,7 +3294,11 @@ else if (typeof define === 'function' && define['amd'])
       try { if (typeof S !== 'undefined' && S && S.otorev) threshold = S.otorev.autoTriggerThreshold || '4x'; } catch (eT) {}
       var ops = 0;
       try { for (var k in opSeen) ops++; } catch (eO) {}
-      return { ready: READY, armed: armed, threshold: threshold, opKinds: ops };
+      /* Fix round 3: lock + deny surface. The console block alone never says
+       * WHY an arm did not happen; these two fields do. */
+      var lock = null, deny = lastDeny;
+      try { var mh = window.__murtherAutoReverse; if (mh && mh.state) lock = mh.state.lockName || null; } catch (eL) {}
+      return { ready: READY, armed: armed, threshold: threshold, opKinds: ops, lock: lock, deny: deny };
     }
     function init() {
       /* Pin 2: guard on the factory alone. No blob check — the pasted factory
@@ -3375,11 +3390,18 @@ else if (typeof define === 'function' && define['amd'])
         var armed = false;
         try { armed = F.is_armed() === 1; } catch (eA) { armed = false; }
         var now = Date.now();
+        /* Fix round 3: refresh the lock when missing. The pump only ever read a
+         * lock born elsewhere; with Auto-Trigger on and nobody splitting yet,
+         * no lock is ever born. Radius/cursor acquisition runs here so watching
+         * starts the moment an enemy walks into radius. */
+        if (!armed && S.otorev.autoTriggerEnabled && !snap.lockName && (now - lastEndAt) > REARM_COOLDOWN_MS) {
+          try { if (typeof m.acquireLock === 'function') { m.acquireLock(false); snap = m.snapshot() || snap; } } catch (eAL) {}
+        }
         if (!armed && S.otorev.autoTriggerEnabled && snap.lockName && (now - lastEndAt) > REARM_COOLDOWN_MS) {
           var key = THRESH_ARKEY[S.otorev.autoTriggerThreshold] || 2;
           try {
             if (F.arm(hashName(snap.lockName) || 2, key) === 1) {
-              armedAt = now; lastArmedKey = key; armed = true;
+              armedAt = now; lastArmedKey = key; armed = true; lastDeny = '';
               diag('auto-reverse core: armed (auto) on "' + snap.lockName + '" x' + key);
               betix('INFO', 'brain armed (auto)', { lock: snap.lockName, arKey: key });
             }
@@ -3425,27 +3447,40 @@ else if (typeof define === 'function' && define['amd'])
       } catch (e) {}
     }
     function ready() { return READY; }
-    /* Step 5 completion: press = arm when the brain is live and something is
-     * locked; the stock immediate fanout stays only for brain-inert or
-     * lockless presses (a bind is never dead). autoReverseFire remains the
-     * brain's RETURN path (pop_action -> fireTrigger). */
+    /* Step 5 completion, fix round 3: press = arm when the brain is live and
+     * something is locked; the stock immediate fanout stays only for
+     * brain-inert presses (a bind is never dead). autoReverseFire remains the
+     * brain's RETURN path (pop_action -> fireTrigger). Fix round 3: acquire
+     * the lock FRESH before arming. The old code only read a lock that nobody
+     * refreshes on this path (locks were born in fireTrigger/inspect), so
+     * lockName was stale-or-empty and both arm paths died silently. */
     function armFromBind(mode) {
       try {
         if (!READY) return false;
         var m = null;
         try { m = window.__murtherAutoReverse || null; } catch (eM) { m = null; }
-        if (!m || typeof m.snapshot !== 'function') return false;
+        if (!m || typeof m.snapshot !== 'function') { lastDeny = 'no-module'; return false; }
+        /* Acquire first: radius rule, cursor sources and fallback exactly as
+         * the stock path would. Silent (no verbose ping) — the arm line below
+         * is the record. */
+        if (typeof m.acquireLock === 'function') { try { m.acquireLock(false); } catch (eA) {} }
         var snap = m.snapshot();
-        if (!snap || !snap.lockName) return false;
+        if (!snap || !snap.lockName) {
+          lastDeny = 'no-lock';
+          diag('auto-reverse core: bind press found no target — get closer or hover the enemy, then press again');
+          betix('INFO', 'brain bind-arm denied', { mode: mode, reason: 'no-lock' });
+          return false;
+        }
         var key = MODE_ARKEY[mode] || 0;
-        if (!key) return false;
+        if (!key) { lastDeny = 'bad-mode'; return false; }
         if (F.arm(hashName(snap.lockName) || 2, key) === 1) {
-          armedAt = Date.now(); lastArmedKey = key;
+          armedAt = Date.now(); lastArmedKey = key; lastDeny = '';
           diag('auto-reverse core: armed (bind ' + mode + ') on "' + snap.lockName + '"');
           betix('INFO', 'brain armed (bind)', { lock: snap.lockName, mode: mode, arKey: key });
           return true;
         }
-      } catch (e) { betix('ERROR', 'brain bind-arm failed', { mode: mode }); }
+        lastDeny = 'arm-rejected';
+      } catch (e) { lastDeny = 'exception'; betix('ERROR', 'brain bind-arm failed', { mode: mode }); }
       return false;
     }
     try { init(); } catch (eI) {}
