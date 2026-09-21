@@ -2,12 +2,13 @@
 """
 Fisen - Observation Script for Murther Auto Reverse Mechanic
 Launch contract: python fisen.py (no args, no flags, no env vars)
-v4.7: proper HTTP/1.1 response reader (status line + headers + Content-Length or
-      chunked body). the old read-until-EOF waited for a close that Chromium's
-      DevTools keep-alive never sends, which is why every probe "hung" since v4.2.
+v4.8: single-file session capture (one betix_session.jsonl per run when
+      single_file is set), self-restarting bridge listener, wire-truth census
+      (opcode/length histograms + 30 s summaries, no packet layouts invented).
 NOTE: the LIVE client under observation is the Fisen client (gde- DOM).
       The Murther client is the project's final deliverable, not a detection target.
 """
+import base64
 import os
 import sys
 import json
@@ -18,6 +19,7 @@ import datetime
 WAIT_STATE = {}
 CONFIRMED_STATE = {}
 BETIX_SCOPE_LOGGERS = {}  # Step 5: per-scope BetixLogger cache for the /log endpoint.
+SESSION = {"obj": None}  # v4.8: the single-file session logger when single_file mode is on.
 CDP_STATE = {"sockets": {}, "frames": [], "dirty": False, "target_id": None,
              "attached": False, "last_nag": 0.0, "last_console_state": None,
              "http_variant": None}
@@ -87,6 +89,53 @@ class BetixLogger:
             self.current_file.write("\n]\n")
             self.current_file.close()
 
+class SessionLogger:
+    """v4.8: one JSON-Lines file per run, all scopes merged, no rotation.
+    Active only when config single_file is true (operator session capture).
+    Fresh file at startup, appended until the process closes."""
+
+    def __init__(self, log_dir):
+        self.log_dir = pathlib.Path(log_dir)
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+        self.filename = self.log_dir / f"betix_session_{ts}.jsonl"
+        self.current_file = open(self.filename, "w", encoding="utf-8")
+
+    def log(self, scope, level, message, data=None):
+        record = {
+            "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "scope": scope,
+            "level": level,
+            "msg": message
+        }
+        if data is not None:
+            record["data"] = data
+        self.current_file.write(json.dumps(record) + "\n")
+        self.current_file.flush()
+
+    def close(self):
+        try:
+            if self.current_file:
+                self.current_file.close()
+                self.current_file = None
+        except Exception:
+            pass
+
+
+class SessionScope:
+    """Adapter so single-file mode plugs into every logger.log(level, msg, data)
+    call site unchanged."""
+
+    def __init__(self, session, scope):
+        self._session = session
+        self._scope = scope
+
+    def log(self, level, message, data=None):
+        self._session.log(self._scope, level, message, data)
+
+    def close(self):
+        pass
+
 def load_config():
     default_config = {
         "bridge_port": 8765,
@@ -95,7 +144,8 @@ def load_config():
         "report_output": "./fisen_report.json",
         "lock_file": "./.fisen.lock",
         "cdp_enabled": True,
-        "cdp_port": 9222
+        "cdp_port": 9222,
+        "single_file": False
     }
     config_path = pathlib.Path("fisen.config.json")
     if config_path.exists():
@@ -262,6 +312,31 @@ def announce(logger, state_key, text, level="WARN"):
     print(text)
     logger.log(level, text)
 
+# v4.8 wire-truth census. Observed facts only: direction, length, and the first
+# payload byte where it base64-decodes cleanly (binary frames) — "text" when it
+# does not. No packet layouts are decoded or claimed here.
+WIRE = {"in": {}, "out": {}, "n_in": 0, "n_out": 0, "win_in": 0, "win_out": 0,
+        "win_ops": {}, "last_sum": 0.0}
+
+def wire_note(direction, preview):
+    try:
+        key = "text"
+        if isinstance(preview, str) and len(preview) >= 4:
+            try:
+                raw = base64.b64decode(preview[:4])
+                if len(raw) >= 1:
+                    key = f"0x{raw[0]:02x}"
+            except Exception:
+                key = "text"
+        h = WIRE.get(direction)
+        if isinstance(h, dict):
+            h[key] = h.get(key, 0) + 1
+        WIRE["n_" + direction] = WIRE.get("n_" + direction, 0) + 1
+        WIRE["win_in" if direction == "in" else "win_out"] += 1
+        WIRE["win_ops"][direction + ":" + key] = WIRE["win_ops"].get(direction + ":" + key, 0) + 1
+    except Exception:
+        pass
+
 async def cdp_observe(logger, config):
     try:
         import websockets
@@ -343,6 +418,7 @@ async def cdp_observe(logger, config):
                         if len(CDP_STATE["frames"]) > 400:
                             CDP_STATE["frames"] = CDP_STATE["frames"][-400:]
                         CDP_STATE["dirty"] = True
+                        wire_note(direction, payload_data)
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -357,6 +433,33 @@ async def cdp_observe(logger, config):
                 CDP_STATE["last_nag"] = now
                 print(f"[FISEN] CDP still not attached (state: {CDP_STATE.get('last_console_state')}). "
                       f"The game tab and the --remote-debugging-port flag must live in the SAME browser.")
+
+async def wire_watch(logger):
+    """v4.8: every 30 s, if frames flowed, log the wire-truth summary. This is
+    the record that proves the game stream is alive during a session — the
+    contrast with an empty client-side reader is then evidence, not assertion."""
+    while True:
+        await asyncio.sleep(30)
+        try:
+            wi = WIRE.get("win_in", 0)
+            wo = WIRE.get("win_out", 0)
+            if wi + wo == 0:
+                continue
+            ops = dict(WIRE.get("win_ops", {}))
+            WIRE["win_in"] = 0
+            WIRE["win_out"] = 0
+            WIRE["win_ops"] = {}
+            WIRE["last_sum"] = datetime.datetime.now(datetime.timezone.utc).timestamp()
+            top = sorted(ops.items(), key=lambda kv: kv[1], reverse=True)[:8]
+            logger.log("INFO", "wire alive (30 s window)",
+                       {"in": wi, "out": wo,
+                        "total_in": WIRE.get("n_in", 0), "total_out": WIRE.get("n_out", 0),
+                        "top_ops": [{"op": k, "n": v} for k, v in top],
+                        "sockets": list(CDP_STATE.get("sockets", {}).values())})
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.log("ERROR", "wire watch failed", {"error": str(e)[:120]})
 
 async def cdp_flush(logger, config):
     report_path = pathlib.Path(config["report_output"])
@@ -490,10 +593,16 @@ async def handle_http(reader, writer, logger, config):
                 records = data.get("records") or []
                 if not isinstance(records, list):
                     raise ValueError("records must be a list")
-                slog = BETIX_SCOPE_LOGGERS.get(scope)
-                if slog is None:
-                    slog = BetixLogger(config["log_dir"], scope, config["max_log_size_bytes"])
-                    BETIX_SCOPE_LOGGERS[scope] = slog
+                slog = None
+                session = SESSION.get("obj")
+                if session is not None:
+                    # v4.8 single-file mode: every scope lands in the session file.
+                    slog = SessionScope(session, scope)
+                else:
+                    slog = BETIX_SCOPE_LOGGERS.get(scope)
+                    if slog is None:
+                        slog = BetixLogger(config["log_dir"], scope, config["max_log_size_bytes"])
+                        BETIX_SCOPE_LOGGERS[scope] = slog
                 accepted = 0
                 for rec in records[:100]:
                     if not isinstance(rec, dict):
@@ -548,7 +657,17 @@ async def main():
         os.environ.pop(key, None)
 
     config = load_config()
-    logger = BetixLogger(config["log_dir"], "fisen", config["max_log_size_bytes"])
+    # v4.8: single-file session mode. One betix_session_<ts>.jsonl per run, all
+    # scopes merged, no rotation — the operator's whole session in one place.
+    # Default stays rotation-compliant; the local fisen.config.json opts in.
+    session = None
+    if config.get("single_file"):
+        session = SessionLogger(config["log_dir"])
+        SESSION["obj"] = session
+        logger = SessionScope(session, "fisen")
+        print(f"[FISEN] single-file session log: {session.filename}")
+    else:
+        logger = BetixLogger(config["log_dir"], "fisen", config["max_log_size_bytes"])
     logger.log("INFO", "Fisen observation script starting", {"config": config})
 
     locked, pid_or_err = acquire_lock(config["lock_file"])
@@ -564,22 +683,45 @@ async def main():
         t1.add_done_callback(task_death_callback(logger, "cdp_observe"))
         t2 = asyncio.create_task(cdp_flush(logger, config))
         t2.add_done_callback(task_death_callback(logger, "cdp_flush"))
+        t3 = asyncio.create_task(wire_watch(logger))
+        t3.add_done_callback(task_death_callback(logger, "wire_watch"))
 
     try:
-        logger.log("INFO", "Starting local HTTP bridge", {"port": config["bridge_port"]})
-        server = await asyncio.start_server(
-            lambda r, w: handle_http(r, w, logger, config),
-            'localhost',
-            config["bridge_port"]
-        )
-        print(f"[FISEN] HTTP Bridge armed on http://localhost:{config['bridge_port']}. CDP observer on port {config.get('cdp_port', 9222)} (content-length-aware).")
-        await server.serve_forever()
+        # v4.8: the listener restarts itself on failure. Capture runs until the
+        # operator closes the process — a dead socket never ends the session.
+        while True:
+            try:
+                logger.log("INFO", "Starting local HTTP bridge", {"port": config["bridge_port"]})
+                server = await asyncio.start_server(
+                    lambda r, w: handle_http(r, w, logger, config),
+                    'localhost',
+                    config["bridge_port"]
+                )
+                print(f"[FISEN] HTTP Bridge armed on http://localhost:{config['bridge_port']}. CDP observer on port {config.get('cdp_port', 9222)} (content-length-aware).")
+                await server.serve_forever()
+                break  # serve_forever only returns on clean close; fall through to release.
+            except (asyncio.CancelledError, KeyboardInterrupt):
+                raise
+            except Exception as e:
+                logger.log("FATAL", "Bridge listener died — re-arming in 5 s, capture continues", {"error": str(e)[:200]})
+                print("[FISEN] Bridge listener died — re-arming in 5 s (session capture continues).")
+                await asyncio.sleep(5)
+    except (asyncio.CancelledError, KeyboardInterrupt):
+        pass
     except Exception as e:
         logger.log("FATAL", "Bridge server crashed", {"error": str(e)})
     finally:
         release_lock(config["lock_file"])
         logger.log("INFO", "Instance lock released. Fisen shutting down.")
-        logger.close()
+        try:
+            logger.close()
+        except Exception:
+            pass
+        if session is not None:
+            try:
+                session.close()
+            except Exception:
+                pass
 
 if __name__ == "__main__":
     try:

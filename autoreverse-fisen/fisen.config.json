@@ -3,5 +3,6 @@
   "log_dir": "./logs",
   "max_log_size_bytes": 716800,
   "report_output": "./fisen_report.json",
-  "lock_file": "./.fisen.lock"
+  "lock_file": "./.fisen.lock",
+  "single_file": true
 }
