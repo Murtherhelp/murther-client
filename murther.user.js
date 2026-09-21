@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Murther — gota.io client
 // @namespace    murther.gota
-// @version      1.74.18
+// @version      1.74.19
 // @description  Murther - a full UI/UX replacement client for play.gota.io: a dark purple theme and a HUD reskin that HOSTS the live native panels (stats ID/Mass/Score/Cells top-centre, FPS/ping/server above the chat, leaderboard top-right, minimap, party, chat) so everything stays synced with the game; a native-synced server list with a verified pick -> join handshake; a clean name/mass leaderboard with an animated border that highlights your own row; searchable settings, themes and a full backup; client hotkeys with live write-through rebinding, chat macros and game-side action keys; and real performance controls (FPS cap / vsync governor, renderer resolution, reduce effects). A self-healing HUD keeps it honest: a state that would leave every panel hidden is reset once, with a toast, instead of blanking the screen. Feature rows explain themselves behind their own arrow (click it) instead of on hover - a category header is the only hover description left; the number on a category header is the real count of rows it is showing; Themes opens with Enable Custom Theme, which switches the client's whole custom look off and says so; Play and Spectate wear an animated white outline; and the profile card's particle field is fitted to the real device pixels, reacts to the pointer and demotes itself when frames get slow.
 // @description  Every release note and the full behavioural history live in the RELEASE HISTORY block below the header - the metadata above carries only the current feature set, so it can never go stale or outgrow a userscript manager's UI.
 // @author       Murther
@@ -827,7 +827,16 @@
 // Genuine refreshes (regions agree, list empty) still keep the old rows, and
 // __murther.serverCheck() now reports pill vs native region, per-tab keys and
 // fresh-vs-cached container identity, so one paste answers 'why' next time.
-// v1.74.18: fix round 5 — detection on blind builds. Pixi rasterises every
+// v1.74.19: audit fixes F1/F5/F7 (+F4 in the bridge script). F1: auto-arm episodes log
+// once (epLogged, reset on every disarm path) instead of every re-arm cycle.
+// F7: fireReturn emits the onAutoReverse contract record (targetId/targetName/
+// verified/initiatedByKey/returnedKey/ts) for the Step 7 harness. F5: console-
+// only simulate(pieces, ownerName) injects pooled-text entries to prove
+// arm→confirm→fire→disarm without a live enemy. F3 recorded as verified-as-
+// designed: fireTrigger({aim:false}) never rewrites aim, and the snapshot
+// path pins the lock coords for aimTick — burst path keeps the cursor, the
+// only physical option without positions.
+//
 // WebGL text into pooled offscreen canvases, so names ARE captured (just
 // without usable coordinates). New pooled-text burst watcher: birth bursts
 // per owner inside 800 ms confirm like absolute counts (thresholds 2/5/10/
@@ -3275,6 +3284,7 @@ else if (typeof define === 'function' && define['amd'])
     var CELL_SZ = 24; // sizeof(Cell): u32 id, u32 owner, f32 x, f32 y, f32 r, u8 me + 3 pad
     var cellPtr = 0, cellCap = 0, outPtr = 0;
     var armedAt = 0, lastArmedKey = 0, lastEndAt = 0, lastDeny = '', noBinLogged = false;
+    var armedOwner = -1, armedName = '', epLogged = false;
     var wasAlive = false, lastOwn = 0, lastFoes = 0;
     /* Fix round 1: REARM_COOLDOWN_MS. Expiry used to re-arm on the very next
      * 100 ms pump while a lock lived, holding tick-reversal ~permanently and
@@ -3460,6 +3470,19 @@ else if (typeof define === 'function' && define['amd'])
       var mode = COUNT_MODE[tc] || '4x';
       var firedMode = (tc === 64 && lastArmedKey === 6) ? 'solo64x' : mode;
       loud('CONFIRMED x' + tc + ' -> returning ' + firedMode + (label ? ' (' + label + ')' : ''), { count: tc, mode: firedMode });
+      /* F7: output contract. The Step 7 harness renders this record; ship it
+       * now so Step 7 is a reader, not a rescue. Generic (unverified) arms
+       * fall back to the synthetic Entity# id per the missing-name rule. */
+      try {
+        betix('INFO', 'onAutoReverse', {
+          targetId: armedOwner,
+          targetName: armedName || ('Entity#' + armedOwner),
+          verified: armedOwner !== 0 && !!armedName,
+          initiatedByKey: lastArmedKey,
+          returnedKey: firedMode,
+          ts: new Date().toISOString()
+        });
+      } catch (eC) {}
       if (m) {
         var prev = null;
         try { prev = m.state.reverseMode; m.state.reverseMode = firedMode; } catch (eS) {}
@@ -3467,7 +3490,7 @@ else if (typeof define === 'function' && define['amd'])
         catch (eT) { betix('ERROR', 'brain return fanout failed', { count: tc }); }
         try { if (prev !== null) m.state.reverseMode = prev; } catch (eR) {}
       }
-      armedAt = 0; lastEndAt = now; armedOwner = -1;
+      armedAt = 0; lastEndAt = now; armedOwner = -1; armedName = ''; epLogged = false;
       loud('returned ' + firedMode + ' fanout, disarmed', { mode: firedMode });
     }
     function pump() {
@@ -3504,7 +3527,7 @@ else if (typeof define === 'function' && define['amd'])
         var masterOn = false;
         try { masterOn = !!(typeof S !== 'undefined' && S && S.otorev && S.otorev.enabled); } catch (eMO) {}
         if (!masterOn) {
-          try { if (READY && F.is_armed && F.is_armed() === 1) { F.disarm(); armedAt = 0; lastEndAt = Date.now(); armedOwner = -1; } } catch (eD) {}
+          try { if (READY && F.is_armed && F.is_armed() === 1) { F.disarm(); armedAt = 0; lastEndAt = Date.now(); armedOwner = -1; armedName = ''; epLogged = false; } } catch (eD) {}
           return;
         }
         if (!READY) return;
@@ -3533,8 +3556,8 @@ else if (typeof define === 'function' && define['amd'])
           var key = THRESH_ARKEY[S.otorev.autoTriggerThreshold] || 2;
           try {
             if (F.arm(hashName(snap.lockName) || 2, key) === 1) {
-              armedAt = now; lastArmedKey = key; armedOwner = hashName(snap.lockName) || 2; armed = true; lastDeny = '';
-              loud('armed (auto) on "' + snap.lockName + '", threshold x' + key, { lock: snap.lockName, arKey: key });
+              armedAt = now; lastArmedKey = key; armedOwner = hashName(snap.lockName) || 2; armedName = snap.lockName || ''; armed = true; lastDeny = '';
+              if (!epLogged) { epLogged = true; loud('armed (auto) on "' + snap.lockName + '", threshold x' + key, { lock: snap.lockName, arKey: key }); }
             }
           } catch (eArm) { betix('ERROR', 'brain auto-arm failed', { err: String((eArm && eArm.message) || eArm) }); }
         }
@@ -3549,8 +3572,8 @@ else if (typeof define === 'function' && define['amd'])
             var gkey = THRESH_ARKEY[S.otorev.autoTriggerThreshold] || 2;
             try {
               if (F.arm(0, gkey) === 1) {
-                armedAt = now; lastArmedKey = gkey; armedOwner = 0; armed = true; lastDeny = '';
-                loud('armed (auto, generic: blind scene) — watching every split for x' + gkey, { arKey: gkey });
+                armedAt = now; lastArmedKey = gkey; armedOwner = 0; armedName = ''; armed = true; lastDeny = '';
+                if (!epLogged) { epLogged = true; loud('armed (auto, generic: blind scene) — watching every split for x' + gkey, { arKey: gkey }); }
               }
             } catch (eGA) { betix('ERROR', 'brain generic auto-arm failed', { err: String((eGA && eGA.message) || eGA) }); }
           }
@@ -3559,7 +3582,7 @@ else if (typeof define === 'function' && define['amd'])
         //    watched enemy that never splits cannot hold the reverse forever.
         if (armed && armedAt && (now - armedAt) > (S.otorev.reverseWindowMs || 380)) {
           try { F.disarm(); } catch (eD) {}
-          armed = false; armedAt = 0; lastEndAt = now; armedOwner = -1;
+          armed = false; armedAt = 0; lastEndAt = now; armedOwner = -1; armedName = ''; epLogged = false;
           diag('auto-reverse core: window expired, disarmed');
         }
         // 4. Poll the core; on confirmation aim at the biggest piece and fan out.
@@ -3605,7 +3628,7 @@ else if (typeof define === 'function' && define['amd'])
         if (!READY) return;
         var on = false;
         try { on = !!(S && S.otorev && S.otorev.enabled && S.otorev.autoTriggerEnabled); } catch (eS) {}
-        if (!on) { try { F.disarm(); } catch (eD) {} armedAt = 0; armedOwner = -1; }
+        if (!on) { try { F.disarm(); } catch (eD) {} armedAt = 0; armedOwner = -1; armedName = ''; epLogged = false; }
       } catch (e) {}
     }
     function ready() { return READY; }
@@ -3652,7 +3675,7 @@ else if (typeof define === 'function' && define['amd'])
            * ignores owner 0 (hashes never produce it), so the snapshot path
            * cannot false-fire; only the burst path can confirm. */
           if (F.arm(0, key) === 1) {
-            armedAt = Date.now(); lastArmedKey = key; armedOwner = 0; lastDeny = '';
+            armedAt = Date.now(); lastArmedKey = key; armedOwner = 0; armedName = ''; lastDeny = '';
             try { toast('Auto Reverse armed (' + mode + ') — watching every split'); } catch (eT3) {}
             loud('armed (bind ' + mode + ', generic: blind scene) — watching every split for x' + key, { mode: mode, arKey: key });
             return true;
@@ -3670,7 +3693,7 @@ else if (typeof define === 'function' && define['amd'])
         var key = MODE_ARKEY[mode] || 0;
         if (!key) { lastDeny = 'bad-mode'; return false; }
         if (F.arm(hashName(snap.lockName) || 2, key) === 1) {
-          armedAt = Date.now(); lastArmedKey = key; armedOwner = hashName(snap.lockName) || 2; lastDeny = '';
+          armedAt = Date.now(); lastArmedKey = key; armedOwner = hashName(snap.lockName) || 2; armedName = snap.lockName || ''; lastDeny = '';
           loud('armed (bind ' + mode + ') on "' + snap.lockName + '" — watching for x' + key, { lock: snap.lockName, mode: mode, arKey: key });
           return true;
         }
@@ -3678,11 +3701,31 @@ else if (typeof define === 'function' && define['amd'])
       } catch (e) { lastDeny = 'exception'; betix('ERROR', 'brain bind-arm failed', { mode: mode }); }
       return false;
     }
+    /* F5: dev-gated synthetic burst injector. Console only, no menu surface.
+     * Injects pooled-text entries (fill+stroke realism: 2 per piece) so the
+     * burst watcher sees a split that never happened on the wire. Exercises
+     * arm → confirm → fire → disarm end to end WITH the real fanout — run it
+     * while alive, or the fanout lands on no cell like any dead split. */
+    function simulate(pieces, ownerName) {
+      try {
+        if (!READY) return { ok: false, why: 'core not ready' };
+        var name = String(ownerName || 'SIM_TARGET');
+        var n = Math.max(1, Math.min(64, parseInt(pieces, 10) || 4));
+        var now = Date.now(), i;
+        if (typeof mmNames === 'undefined' || !mmNames || !mmNames.entries) return { ok: false, why: 'no text capture' };
+        for (i = 0; i < n * 2; i++) {
+          try { mmNames.entries.push({ text: name, ts: now }); } catch (eP) { return { ok: false, why: 'inject failed' }; }
+        }
+        var stillArmed = false;
+        try { stillArmed = !!(F.is_armed && F.is_armed() === 1); } catch (eA) {}
+        return { ok: true, pieces: n, entries: n * 2, armed: stillArmed };
+      } catch (e) { return { ok: false, why: 'exception' }; }
+    }
     try { init(); } catch (eI) {}
     /* Step 5 tuning: 100 ms pump against the 380 ms reverse window (was 250 ms,
      * which ate two-thirds of the budget before the brain could speak). */
     try { setInterval(pump, 100); } catch (eP) {}
-    return { init: init, status: status, ready: ready, armFromBind: armFromBind, noteFrame: noteFrame, syncSettings: syncSettings };
+    return { init: init, status: status, ready: ready, armFromBind: armFromBind, noteFrame: noteFrame, syncSettings: syncSettings, simulate: simulate };
   })();
 
   var mmNames = {

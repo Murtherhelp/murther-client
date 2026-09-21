@@ -102,7 +102,9 @@ class SessionLogger:
         self.log_dir = pathlib.Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
         ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
-        self.filename = self.log_dir / f"betix_session_{ts}.json"
+        # F4: mandatory _<index> segment. Single-file sessions never split, so
+        # idx is always 0001 — the segment exists for scheme compliance.
+        self.filename = self.log_dir / f"betix_session_{ts}_0001.json"
         self.records = []
         self._write()
 
