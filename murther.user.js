@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Murther — gota.io client
 // @namespace    murther.gota
-// @version      1.74.10
+// @version      1.74.11
 // @description  Murther - a full UI/UX replacement client for play.gota.io: a dark purple theme and a HUD reskin that HOSTS the live native panels (stats ID/Mass/Score/Cells top-centre, FPS/ping/server above the chat, leaderboard top-right, minimap, party, chat) so everything stays synced with the game; a native-synced server list with a verified pick -> join handshake; a clean name/mass leaderboard with an animated border that highlights your own row; searchable settings, themes and a full backup; client hotkeys with live write-through rebinding, chat macros and game-side action keys; and real performance controls (FPS cap / vsync governor, renderer resolution, reduce effects). A self-healing HUD keeps it honest: a state that would leave every panel hidden is reset once, with a toast, instead of blanking the screen. Feature rows explain themselves behind their own arrow (click it) instead of on hover - a category header is the only hover description left; the number on a category header is the real count of rows it is showing; Themes opens with Enable Custom Theme, which switches the client's whole custom look off and says so; Play and Spectate wear an animated white outline; and the profile card's particle field is fitted to the real device pixels, reacts to the pointer and demotes itself when frames get slow.
 // @description  Every release note and the full behavioural history live in the RELEASE HISTORY block below the header - the metadata above carries only the current feature set, so it can never go stale or outgrow a userscript manager's UI.
 // @author       Murther
@@ -827,24 +827,28 @@
 // Genuine refreshes (regions agree, list empty) still keep the old rows, and
 // __murther.serverCheck() now reports pill vs native region, per-tab keys and
 // fresh-vs-cached container identity, so one paste answers 'why' next time.
-// Step 5 (unreleased): Auto Reverse grows a deterministic WASM brain
-// (MX_AUTOREVERSE_CORE, built from the Step 2-4 C++ core). Press = arm when
+// v1.74.11: Step 5 ships. Auto Reverse grows a deterministic WASM brain
+// (MX_AUTOREVERSE_CORE, factory embedded from CI build 3). Press = arm when
 // the brain is live and a target is locked (autoReverseBindPress), stock
 // fanout otherwise; confirmation returns the matching MULTI-SPLIT through the
 // existing autoReverseFire path. The single mxReverseInstall send hook now
 // reverses on manual-toggle OR brain-armed, and disarms on fire or
-// reverseWindowMs expiry. triggerMode/antiFreeze are deprecated (loaded,
-// ignored); internal OtoRev-era names are now Auto Reverse. Brain arm /
-// confirm / return / error transitions emit to Betix (MX_BETIX -> loopback
-// POST /log; failure-silent, console stays for humans). No external
-// observation runtime is referenced anywhere in this client.
+// reverseWindowMs expiry (plus a 1500 ms re-arm cooldown, so a watched enemy
+// that never splits cannot hold the reverse forever). triggerMode/antiFreeze
+// are deprecated (loaded, ignored); internal OtoRev-era names are now Auto
+// Reverse; owner names hash case-insensitively so lock and foe labels agree.
+// Brain arm / confirm / return / error transitions emit to Betix (MX_BETIX ->
+// loopback POST /log; failure-silent, console stays for humans) and mirror
+// to console under the panel's Verbose toggle. Tampermonkey auto-updates
+// from the repo raw URL (updateURL/downloadURL). No external observation
+// runtime is referenced anywhere in this client.
 // Stated deviations (self-correction record): (1) "wire packets into the
 // core" arrives as scene-derived owner-grouped cells, not raw 0x02 decode —
 // the core ABI is cell-based, the 0x02 record layout was never fully
 // reversed, and the scene is post-decode ground truth; closest non-OCR
 // alternative, accepted. (2) The companion-detector gate binds the observation
 // runtime (no capture before handshake), not the shipped client — a client
-// — a client detecting itself would be circular, so Murther's own boot gate
+// detecting itself would be circular, so Murther's own boot gate
 // is the equivalent and the pump respects it.
 //
 // v1.73.0: nick-anchored multibox lock. Center-only locked a stranger and
