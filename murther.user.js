@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Murther — gota.io client
 // @namespace    murther.gota
-// @version      1.74.14
+// @version      1.74.15
 // @description  Murther - a full UI/UX replacement client for play.gota.io: a dark purple theme and a HUD reskin that HOSTS the live native panels (stats ID/Mass/Score/Cells top-centre, FPS/ping/server above the chat, leaderboard top-right, minimap, party, chat) so everything stays synced with the game; a native-synced server list with a verified pick -> join handshake; a clean name/mass leaderboard with an animated border that highlights your own row; searchable settings, themes and a full backup; client hotkeys with live write-through rebinding, chat macros and game-side action keys; and real performance controls (FPS cap / vsync governor, renderer resolution, reduce effects). A self-healing HUD keeps it honest: a state that would leave every panel hidden is reset once, with a toast, instead of blanking the screen. Feature rows explain themselves behind their own arrow (click it) instead of on hover - a category header is the only hover description left; the number on a category header is the real count of rows it is showing; Themes opens with Enable Custom Theme, which switches the client's whole custom look off and says so; Play and Spectate wear an animated white outline; and the profile card's particle field is fitted to the real device pixels, reacts to the pointer and demotes itself when frames get slow.
 // @description  Every release note and the full behavioural history live in the RELEASE HISTORY block below the header - the metadata above carries only the current feature set, so it can never go stale or outgrow a userscript manager's UI.
 // @author       Murther
@@ -827,7 +827,10 @@
 // Genuine refreshes (regions agree, list empty) still keep the old rows, and
 // __murther.serverCheck() now reports pill vs native region, per-tab keys and
 // fresh-vs-cached container identity, so one paste answers 'why' next time.
-// v1.74.14: bind presses while spectating say so ("spawn first") instead of
+// v1.74.15: spectating bind presses stay fully silent after the spawn-first
+// toast — the stock fanout no longer arms a phantom reverse window on no
+// cell. (deny: spectating short-circuits before autoReverseFire.)
+//
 // dying silently like a broken brain. The deny reason is also visible in the
 // console block (spectating / no-lock / ...), so dead tests stop masquerading
 // as brain failures.
@@ -13372,6 +13375,10 @@ function applyChatResize() {
         toast('Auto Reverse armed (' + mode + ') — watching locked target');
         return;
       }
+      /* Spectating deny already toasted "spawn first" from the glue — firing
+       * the stock fanout while dead would only arm a phantom reverse window
+       * on no cell. Stay silent; the toast is the response. */
+      try { if (brain && brain.status && brain.status().deny === 'spectating') return; } catch (eD) {}
     } catch (eB) {}
     autoReverseFire(mode);
   }
