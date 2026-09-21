@@ -3339,7 +3339,16 @@ else if (typeof define === 'function' && define['amd'])
     }
     function pump() {
       try {
-        if (typeof S === 'undefined' || !S || !S.otorev || !S.otorev.enabled) return;
+        /* Fix round 2: the brain must never stay armed while the master switch
+         * is off. The old early-return left a bind-armed core latched (no
+         * expiry, no poll), so the send hook negated every tick forever and
+         * the cell froze. Disarm first, then respect the switch. */
+        var masterOn = false;
+        try { masterOn = !!(typeof S !== 'undefined' && S && S.otorev && S.otorev.enabled); } catch (eMO) {}
+        if (!masterOn) {
+          try { if (READY && F.is_armed && F.is_armed() === 1) { F.disarm(); armedAt = 0; lastEndAt = Date.now(); } } catch (eD) {}
+          return;
+        }
         var m = null;
         try { m = window.__murtherAutoReverse || null; } catch (eM) { m = null; }
         if (!m || typeof m.snapshot !== 'function') return;
@@ -13296,6 +13305,12 @@ function applyChatResize() {
    * (the enemy's confirming multi-split returns the matching fanout); otherwise
    * the stock immediate fanout. autoReverseFire stays the brain's RETURN path. */
   function autoReverseBindPress(mode) {
+    /* Fix round 2: never arm the brain while the master switch is off. The
+     * pump does not run when disabled, so a bind-arm would latch forever
+     * (send hook negating every tick = frozen cell). Straight to stock. */
+    var enabled = false;
+    try { enabled = !!(typeof S !== 'undefined' && S && S.otorev && S.otorev.enabled); } catch (eE) {}
+    if (!enabled) { autoReverseFire(mode); return; }
     try { if (typeof mxPaused !== 'undefined' && mxPaused) return; } catch (eS) {}
     try {
       var brain = (typeof MX_AUTOREVERSE_CORE !== 'undefined') ? MX_AUTOREVERSE_CORE : null;
