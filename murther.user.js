@@ -9,6 +9,8 @@
 // @run-at       document-start
 // @grant        none
 // @noframes
+// @updateURL    https://raw.githubusercontent.com/Murtherhelp/murther-client/main/murther.user.js
+// @downloadURL  https://raw.githubusercontent.com/Murtherhelp/murther-client/main/murther.user.js
 // ==/UserScript==
 //
 // ============================== RELEASE HISTORY ==============================
