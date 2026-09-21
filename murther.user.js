@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Murther — gota.io client
 // @namespace    murther.gota
-// @version      1.74.16
+// @version      1.74.17
 // @description  Murther - a full UI/UX replacement client for play.gota.io: a dark purple theme and a HUD reskin that HOSTS the live native panels (stats ID/Mass/Score/Cells top-centre, FPS/ping/server above the chat, leaderboard top-right, minimap, party, chat) so everything stays synced with the game; a native-synced server list with a verified pick -> join handshake; a clean name/mass leaderboard with an animated border that highlights your own row; searchable settings, themes and a full backup; client hotkeys with live write-through rebinding, chat macros and game-side action keys; and real performance controls (FPS cap / vsync governor, renderer resolution, reduce effects). A self-healing HUD keeps it honest: a state that would leave every panel hidden is reset once, with a toast, instead of blanking the screen. Feature rows explain themselves behind their own arrow (click it) instead of on hover - a category header is the only hover description left; the number on a category header is the real count of rows it is showing; Themes opens with Enable Custom Theme, which switches the client's whole custom look off and says so; Play and Spectate wear an animated white outline; and the profile card's particle field is fitted to the real device pixels, reacts to the pointer and demotes itself when frames get slow.
 // @description  Every release note and the full behavioural history live in the RELEASE HISTORY block below the header - the metadata above carries only the current feature set, so it can never go stale or outgrow a userscript manager's UI.
 // @author       Murther
@@ -827,7 +827,12 @@
 // Genuine refreshes (regions agree, list empty) still keep the old rows, and
 // __murther.serverCheck() now reports pill vs native region, per-tab keys and
 // fresh-vs-cached container identity, so one paste answers 'why' next time.
-// v1.74.16: fix round 4 — evidence burden moves into the client. New loud()
+// v1.74.17: deny reasons split spectating from reader-blind via inLiveSession
+// (menu shown = truly spectating; in match with zero own cells = the scene
+// reader is blind on WebGL builds and the deny says so). Console block gains
+// live. "Spawn first" verdicts from screenshots are retired — Mass/Score HUD
+// is unreliable, the match state is not.
+//
 // channel (unconditional console + Betix) carries Play clicks, spawn/die
 // edges, bind-press outcomes with target names, CONFIRMED and returns —
 // nothing observable hides behind Verbose any more. Deny records and the
@@ -3320,7 +3325,9 @@ else if (typeof define === 'function' && define['amd'])
        * WHY an arm did not happen; these two fields do. */
       var lock = null, deny = lastDeny;
       try { var mh = window.__murtherAutoReverse; if (mh && mh.state) lock = mh.state.lockName || null; } catch (eL) {}
-      return { ready: READY, armed: armed, threshold: threshold, opKinds: ops, lock: lock, deny: deny, own: lastOwn, foes: lastFoes };
+      var live = false;
+      try { live = (typeof inLiveSession === 'function') ? !!inLiveSession() : (lastOwn > 0); } catch (eLV) {}
+      return { ready: READY, armed: armed, threshold: threshold, opKinds: ops, lock: lock, deny: deny, own: lastOwn, foes: lastFoes, live: live };
     }
     function init() {
       /* Pin 2: guard on the factory alone. No blob check — the pasted factory
@@ -3399,7 +3406,12 @@ else if (typeof define === 'function' && define['amd'])
         if (aliveNow !== wasAlive) {
           wasAlive = aliveNow;
           if (aliveNow) loud('spawned (' + ownN + ' own cells, ' + foeN + ' foes in view)', { own: ownN, foes: foeN });
-          else loud('died / spectating — press Play to rejoin', { foes: foeN });
+          else {
+            var inMatch = false;
+            try { inMatch = (typeof inLiveSession === 'function') ? !!inLiveSession() : false; } catch (eIM) {}
+            if (inMatch) loud('own cells vanished while in match (died, or reader blind) — press Play/respawn', { foes: foeN });
+            else loud('died / spectating — press Play to rejoin', { foes: foeN });
+          }
         }
         /* Fix round 2: the brain must never stay armed while the master switch
          * is off. The old early-return left a bind-armed core latched (no
@@ -3500,14 +3512,26 @@ else if (typeof define === 'function' && define['amd'])
         if (typeof m.acquireLock === 'function') { try { m.acquireLock(false); } catch (eA) {} }
         var snap = m.snapshot();
         if (!snap || !snap.own || !snap.own.length) {
-          /* Spectating (or scene blind): no own cells means no origin, no
-           * lock, no arm — and stock fire would be equally invisible. Say so
-           * once per press instead of dying silently like a broken brain. */
-          lastDeny = 'spectating';
-          var foeS = 0;
-          try { foeS = (snap && snap.foes && snap.foes.length) || 0; } catch (eFC) {}
-          try { toast('Auto Reverse: spectating — spawn first, then press'); } catch (eT) {}
-          loud('bind press denied (spectating, ' + foeS + ' foes in view) — spawn first', { mode: mode, foes: foeS });
+          /* No own cells in the scene read. Two different truths share this
+           * shape, so ask the match state instead of guessing: menu shown =
+           * truly spectating; menu hidden (in match) with zero own cells =
+           * the scene reader is blind on this build (WebGL, app not exposed)
+           * and the deny must say so. */
+          var liveNow = false;
+          try { liveNow = (typeof inLiveSession === 'function') ? !!inLiveSession() : false; } catch (eLV) {}
+          if (!liveNow) {
+            lastDeny = 'spectating';
+            var foeS = 0;
+            try { foeS = (snap && snap.foes && snap.foes.length) || 0; } catch (eFC) {}
+            try { toast('Auto Reverse: spectating — spawn first, then press'); } catch (eT) {}
+            loud('bind press denied (spectating, ' + foeS + ' foes in view) — spawn first', { mode: mode, foes: foeS });
+            return false;
+          }
+          lastDeny = 'reader-blind';
+          var foeB = 0;
+          try { foeB = (snap && snap.foes && snap.foes.length) || 0; } catch (eFB) {}
+          try { toast('Auto Reverse: in match but the scene shows no own cells (reader blind) — lock impossible'); } catch (eT2) {}
+          loud('bind press denied (reader-blind: in match, own=0, foes=' + foeB + ') — no lock possible, no arm', { mode: mode, own: 0, foes: foeB });
           return false;
         }
         if (!snap.lockName) {

@@ -5,6 +5,8 @@ Launch contract: python fisen.py (no args, no flags, no env vars)
 v4.8: single-file session capture (one betix_session.jsonl per run when
       single_file is set), self-restarting bridge listener, wire-truth census
       (opcode/length histograms + 30 s summaries, no packet layouts invented).
+v4.9: session file is valid JSON (betix_session_<ts>.json array, atomic
+      rewrite per record) — same content, same scopes, same capture-until-close.
 NOTE: the LIVE client under observation is the Fisen client (gde- DOM).
       The Murther client is the project's final deliverable, not a detection target.
 """
@@ -90,16 +92,19 @@ class BetixLogger:
             self.current_file.close()
 
 class SessionLogger:
-    """v4.8: one JSON-Lines file per run, all scopes merged, no rotation.
+    """v4.8/v4.9: one valid-JSON file per run, all scopes merged, no rotation.
     Active only when config single_file is true (operator session capture).
-    Fresh file at startup, appended until the process closes."""
+    Fresh file at startup, appended until the process closes. v4.9: the file
+    is a real JSON array (betix_session_<ts>.json), rewritten atomically on
+    every record so it stays valid even if the process is killed mid-run."""
 
     def __init__(self, log_dir):
         self.log_dir = pathlib.Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
         ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
-        self.filename = self.log_dir / f"betix_session_{ts}.jsonl"
-        self.current_file = open(self.filename, "w", encoding="utf-8")
+        self.filename = self.log_dir / f"betix_session_{ts}.json"
+        self.records = []
+        self._write()
 
     def log(self, scope, level, message, data=None):
         record = {
@@ -110,14 +115,18 @@ class SessionLogger:
         }
         if data is not None:
             record["data"] = data
-        self.current_file.write(json.dumps(record) + "\n")
-        self.current_file.flush()
+        self.records.append(record)
+        self._write()
+
+    def _write(self):
+        tmp = str(self.filename) + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(self.records, f, indent=1)
+        os.replace(tmp, self.filename)
 
     def close(self):
         try:
-            if self.current_file:
-                self.current_file.close()
-                self.current_file = None
+            self._write()
         except Exception:
             pass
 
