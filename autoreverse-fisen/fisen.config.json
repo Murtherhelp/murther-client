@@ -4,5 +4,6 @@
   "max_log_size_bytes": 716800,
   "report_output": "./fisen_report.json",
   "lock_file": "./.fisen.lock",
-  "single_file": true
+  "single_file": true,
+  "full_preview": true
 }

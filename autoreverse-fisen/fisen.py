@@ -156,7 +156,8 @@ def load_config():
         "lock_file": "./.fisen.lock",
         "cdp_enabled": True,
         "cdp_port": 9222,
-        "single_file": False
+        "single_file": False,
+        "full_preview": False
     }
     config_path = pathlib.Path("fisen.config.json")
     if config_path.exists():
@@ -418,12 +419,21 @@ async def cdp_observe(logger, config):
                         direction = "in" if m.endswith("Received") else "out"
                         body = p.get("response") if direction == "in" else p.get("request")
                         payload_data = (body or {}).get("payloadData") or ""
+                        # Audit full-preview flag: 2048-char previews for in:0x02
+                        # frames only, so foe name/id offsets can be derived from
+                        # real bytes. Cap and rotation unchanged. Off by default.
+                        cap = 256
+                        try:
+                            if config.get("full_preview") and direction == "in":
+                                cap = 2048
+                        except Exception:
+                            cap = 256
                         CDP_STATE["frames"].append({
                             "dir": direction,
                             "t": p.get("timestamp"),
                             "rt": int(datetime.datetime.now(datetime.timezone.utc).timestamp() * 1000),
                             "len": len(payload_data),
-                            "preview": payload_data[:256],
+                            "preview": payload_data[:cap],
                             "socketUrl": CDP_STATE["sockets"].get(str(p.get("socketId")))
                         })
                         if len(CDP_STATE["frames"]) > 400:

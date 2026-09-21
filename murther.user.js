@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Murther — gota.io client
 // @namespace    murther.gota
-// @version      1.74.19
+// @version      1.74.20
 // @description  Murther - a full UI/UX replacement client for play.gota.io: a dark purple theme and a HUD reskin that HOSTS the live native panels (stats ID/Mass/Score/Cells top-centre, FPS/ping/server above the chat, leaderboard top-right, minimap, party, chat) so everything stays synced with the game; a native-synced server list with a verified pick -> join handshake; a clean name/mass leaderboard with an animated border that highlights your own row; searchable settings, themes and a full backup; client hotkeys with live write-through rebinding, chat macros and game-side action keys; and real performance controls (FPS cap / vsync governor, renderer resolution, reduce effects). A self-healing HUD keeps it honest: a state that would leave every panel hidden is reset once, with a toast, instead of blanking the screen. Feature rows explain themselves behind their own arrow (click it) instead of on hover - a category header is the only hover description left; the number on a category header is the real count of rows it is showing; Themes opens with Enable Custom Theme, which switches the client's whole custom look off and says so; Play and Spectate wear an animated white outline; and the profile card's particle field is fitted to the real device pixels, reacts to the pointer and demotes itself when frames get slow.
 // @description  Every release note and the full behavioural history live in the RELEASE HISTORY block below the header - the metadata above carries only the current feature set, so it can never go stale or outgrow a userscript manager's UI.
 // @author       Murther
@@ -827,7 +827,13 @@
 // Genuine refreshes (regions agree, list empty) still keep the old rows, and
 // __murther.serverCheck() now reports pill vs native region, per-tab keys and
 // fresh-vs-cached container identity, so one paste answers 'why' next time.
-// v1.74.19: audit fixes F1/F5/F7 (+F4 in the bridge script). F1: auto-arm episodes log
+// v1.74.20: audit round (F1/F2/F4/F5/F7). simulate() re-exposed on window +
+// module handle (IIFE scope was console-unreachable); blind-scene generic arm
+// removed — auto path denies honestly until wire ownership is decoded, bind
+// path falls through to stock; auto-arm episodes log once; fireReturn emits
+// the onAutoReverse contract record. F3 verified-as-designed (no coords, no
+// aimAt). Bridge takes the full_preview flag for the decoder session.
+//
 // once (epLogged, reset on every disarm path) instead of every re-arm cycle.
 // F7: fireReturn emits the onAutoReverse contract record (targetId/targetName/
 // verified/initiatedByKey/returnedKey/ts) for the Step 7 harness. F5: console-
@@ -2837,7 +2843,10 @@
      * only ever created by fireTrigger({aim:true}) and inspect()-on-split, both
      * of which the new press path bypasses. Export acquireLock so the brain can
      * acquire fresh before arming instead of reading a stale/empty lockName. */
-    try { window.__murtherAutoReverse = { configure: configure, inspect: inspect, report: report, state: state, fireTrigger: fireTrigger, snapshot: snapshot, acquireLock: acquireLock }; } catch (e) {}
+    /* Audit FINDING 1: console-reachable simulate even if init() runs before
+     * the factory exists (late boot order). The literal binds a fallback that
+     * init() overwrites with the live function once READY flips true. */
+    try { window.__murtherAutoReverse = { configure: configure, inspect: inspect, report: report, state: state, fireTrigger: fireTrigger, snapshot: snapshot, acquireLock: acquireLock, simulate: (typeof MX_AUTOREVERSE_CORE !== 'undefined' && MX_AUTOREVERSE_CORE.simulate) ? MX_AUTOREVERSE_CORE.simulate : function () { return { ok: false, why: 'core not ready' }; } }; } catch (e) {}
     /* Step 5 compat: the pre-rename handle. Persisted keys stay 'otorev*'; this alias
      * lets any external probe using the old name keep working. */
     try { window.__murtherOtoRev = window.__murtherAutoReverse; } catch (eAlias) {}
@@ -3388,6 +3397,12 @@ else if (typeof define === 'function' && define['amd'])
             outPtr = F.malloc(12);
             F.init_engine();
             READY = true;
+            /* Audit FINDING 1: the glue IIFE never touches window, so the
+             * console cannot reach MX_AUTOREVERSE_CORE (ReferenceError). Hang
+             * simulate off surfaces that are already global and proven
+             * reachable: window.__mxARSim + the module handle. */
+            try { window.__mxARSim = simulate; } catch (eS1) {}
+            try { if (window.__murtherAutoReverse) window.__murtherAutoReverse.simulate = simulate; } catch (eS2) {}
             diag('auto-reverse core: WASM brain ready');
           } catch (eI) { READY = false; }
         }).catch(function () { READY = false; });
@@ -3561,21 +3576,17 @@ else if (typeof define === 'function' && define['amd'])
             }
           } catch (eArm) { betix('ERROR', 'brain auto-arm failed', { err: String((eArm && eArm.message) || eArm) }); }
         }
-        /* Fix round 5: generic auto-arm for blind scenes. No labels at all +
-         * in match + cooldown = arm the burst watch on the threshold key.
-         * Owner 0 (generic) never matches a hashed owner, so the snapshot
-         * path cannot false-fire; only birth bursts confirm. */
+        /* Audit blind-arm honesty fix: the generic watch promised confirms the
+         * data path cannot deliver, and re-armed every cooldown cycle for
+         * pure log churn. Until wire ownership is decoded, a blind scene
+         * denies honestly (once per lastDeny state, not per pump) and no
+         * arm is ever issued here. */
         if (!armed && S.otorev.autoTriggerEnabled && ownN === 0 && foeN === 0 && (now - lastEndAt) > REARM_COOLDOWN_MS) {
           var liveG = false;
           try { liveG = (typeof inLiveSession === 'function') ? !!inLiveSession() : false; } catch (eLG) {}
-          if (liveG) {
-            var gkey = THRESH_ARKEY[S.otorev.autoTriggerThreshold] || 2;
-            try {
-              if (F.arm(0, gkey) === 1) {
-                armedAt = now; lastArmedKey = gkey; armedOwner = 0; armedName = ''; armed = true; lastDeny = '';
-                if (!epLogged) { epLogged = true; loud('armed (auto, generic: blind scene) — watching every split for x' + gkey, { arKey: gkey }); }
-              }
-            } catch (eGA) { betix('ERROR', 'brain generic auto-arm failed', { err: String((eGA && eGA.message) || eGA) }); }
+          if (liveG && lastDeny !== 'reader-blind') {
+            lastDeny = 'reader-blind';
+            betix('INFO', 'auto-trigger denied: no count source (scene blind, wire ownership undecoded yet)', {});
           }
         }
         // 3. The arm window is bounded by the existing reverseWindowMs setting so a
@@ -3668,20 +3679,14 @@ else if (typeof define === 'function' && define['amd'])
           }
           var key = MODE_ARKEY[mode] || 0;
           if (!key) { lastDeny = 'bad-mode'; return false; }
+          /* Audit blind-arm honesty fix: the generic watch promised confirms
+           * the data path cannot deliver (blind scene, wire ownership
+           * undecoded). Deny honestly until a count source exists; the
+           * dispatcher falls through to the stock fanout + reverse, so manual
+           * play works everywhere and only the automatic watch refuses. */
           lastDeny = 'reader-blind';
-          /* Fix round 5: blind scene + in match = GENERIC arm, not deny. No
-           * lock can ever form (nothing to hover against), but birth bursts
-           * are still observable — owner 0 means "anyone". The WASM core
-           * ignores owner 0 (hashes never produce it), so the snapshot path
-           * cannot false-fire; only the burst path can confirm. */
-          if (F.arm(0, key) === 1) {
-            armedAt = Date.now(); lastArmedKey = key; armedOwner = 0; armedName = ''; lastDeny = '';
-            try { toast('Auto Reverse armed (' + mode + ') — watching every split'); } catch (eT3) {}
-            loud('armed (bind ' + mode + ', generic: blind scene) — watching every split for x' + key, { mode: mode, arKey: key });
-            return true;
-          }
-          lastDeny = 'arm-rejected';
-          loud('bind press denied (reader-blind arm rejected)', { mode: mode });
+          try { toast('Auto Reverse: no count source yet (blind scene) — firing stock split, auto-watch parked'); } catch (eT3) {}
+          loud('bind press denied (reader-blind: blind scene, wire ownership undecoded) — stock fired', { mode: mode });
           return false;
         }
         if (!snap.lockName) {
