@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Murther — gota.io client
 // @namespace    murther.gota
-// @version      1.74.11
+// @version      1.74.12
 // @description  Murther - a full UI/UX replacement client for play.gota.io: a dark purple theme and a HUD reskin that HOSTS the live native panels (stats ID/Mass/Score/Cells top-centre, FPS/ping/server above the chat, leaderboard top-right, minimap, party, chat) so everything stays synced with the game; a native-synced server list with a verified pick -> join handshake; a clean name/mass leaderboard with an animated border that highlights your own row; searchable settings, themes and a full backup; client hotkeys with live write-through rebinding, chat macros and game-side action keys; and real performance controls (FPS cap / vsync governor, renderer resolution, reduce effects). A self-healing HUD keeps it honest: a state that would leave every panel hidden is reset once, with a toast, instead of blanking the screen. Feature rows explain themselves behind their own arrow (click it) instead of on hover - a category header is the only hover description left; the number on a category header is the real count of rows it is showing; Themes opens with Enable Custom Theme, which switches the client's whole custom look off and says so; Play and Spectate wear an animated white outline; and the profile card's particle field is fitted to the real device pixels, reacts to the pointer and demotes itself when frames get slow.
 // @description  Every release note and the full behavioural history live in the RELEASE HISTORY block below the header - the metadata above carries only the current feature set, so it can never go stale or outgrow a userscript manager's UI.
 // @author       Murther
@@ -827,7 +827,12 @@
 // Genuine refreshes (regions agree, list empty) still keep the old rows, and
 // __murther.serverCheck() now reports pill vs native region, per-tab keys and
 // fresh-vs-cached container identity, so one paste answers 'why' next time.
-// v1.74.11: Step 5 ships. Auto Reverse grows a deterministic WASM brain
+// v1.74.12: fix round 2-equivalent in one place — the brain can neither arm
+// nor stay armed while the master switch is off. A bind press with the master
+// off goes straight to the stock fanout (never touches the core), and the
+// pump disarms a latched core before respecting the switch. This closes the
+// bind-arm freeze: an armed core with a dead pump negated every tick forever.
+//
 // (MX_AUTOREVERSE_CORE, factory embedded from CI build 3). Press = arm when
 // the brain is live and a target is locked (autoReverseBindPress), stock
 // fanout otherwise; confirmation returns the matching MULTI-SPLIT through the
