@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Murther — gota.io client
 // @namespace    murther.gota
-// @version      1.74.15
+// @version      1.74.16
 // @description  Murther - a full UI/UX replacement client for play.gota.io: a dark purple theme and a HUD reskin that HOSTS the live native panels (stats ID/Mass/Score/Cells top-centre, FPS/ping/server above the chat, leaderboard top-right, minimap, party, chat) so everything stays synced with the game; a native-synced server list with a verified pick -> join handshake; a clean name/mass leaderboard with an animated border that highlights your own row; searchable settings, themes and a full backup; client hotkeys with live write-through rebinding, chat macros and game-side action keys; and real performance controls (FPS cap / vsync governor, renderer resolution, reduce effects). A self-healing HUD keeps it honest: a state that would leave every panel hidden is reset once, with a toast, instead of blanking the screen. Feature rows explain themselves behind their own arrow (click it) instead of on hover - a category header is the only hover description left; the number on a category header is the real count of rows it is showing; Themes opens with Enable Custom Theme, which switches the client's whole custom look off and says so; Play and Spectate wear an animated white outline; and the profile card's particle field is fitted to the real device pixels, reacts to the pointer and demotes itself when frames get slow.
 // @description  Every release note and the full behavioural history live in the RELEASE HISTORY block below the header - the metadata above carries only the current feature set, so it can never go stale or outgrow a userscript manager's UI.
 // @author       Murther
@@ -827,7 +827,12 @@
 // Genuine refreshes (regions agree, list empty) still keep the old rows, and
 // __murther.serverCheck() now reports pill vs native region, per-tab keys and
 // fresh-vs-cached container identity, so one paste answers 'why' next time.
-// v1.74.15: spectating bind presses stay fully silent after the spawn-first
+// v1.74.16: fix round 4 — evidence burden moves into the client. New loud()
+// channel (unconditional console + Betix) carries Play clicks, spawn/die
+// edges, bind-press outcomes with target names, CONFIRMED and returns —
+// nothing observable hides behind Verbose any more. Deny records and the
+// console block carry own/foe counts so a blind reader is measurable.
+//
 // toast — the stock fanout no longer arms a phantom reverse window on no
 // cell. (deny: spectating short-circuits before autoReverseFire.)
 //
@@ -3255,6 +3260,7 @@ else if (typeof define === 'function' && define['amd'])
     var CELL_SZ = 24; // sizeof(Cell): u32 id, u32 owner, f32 x, f32 y, f32 r, u8 me + 3 pad
     var cellPtr = 0, cellCap = 0, outPtr = 0;
     var armedAt = 0, lastArmedKey = 0, lastEndAt = 0, lastDeny = '', noBinLogged = false;
+    var wasAlive = false, lastOwn = 0, lastFoes = 0;
     /* Fix round 1: REARM_COOLDOWN_MS. Expiry used to re-arm on the very next
      * 100 ms pump while a lock lived, holding tick-reversal ~permanently and
      * freezing the cell. Auto-arm now waits this long after any window end. */
@@ -3284,6 +3290,15 @@ else if (typeof define === 'function' && define['amd'])
     /* Step 5 completion: brain transitions go to Betix (record) as well as the
      * console path. Failure-silent by construction (see MX_BETIX). */
     function betix(level, msg, data) { try { MX_BETIX.log(level, msg, data); } catch (e) {} }
+    /* Fix round 4: loud() is the unconditional event channel. diag() stays
+     * verbose-gated for pump internals, but user-initiated or rare lifecycle
+     * events (Play click, spawn, death, press outcome, CONFIRMED, return)
+     * must NEVER depend on a toggle the operator may not have found. Rare +
+     * high-value = always printed, always recorded. */
+    function loud(msg, data) {
+      try { console.log('[auto-reverse] ' + msg); } catch (eC) {}
+      betix('INFO', msg, data || null);
+    }
     /* Fix round 1: names hash case/whitespace-insensitively. Lock names (radius
      * rule, cursor pick) and foe labels come from different readers; without
      * this the core can watch an owner id no foe group ever hashes to, arming
@@ -3305,7 +3320,7 @@ else if (typeof define === 'function' && define['amd'])
        * WHY an arm did not happen; these two fields do. */
       var lock = null, deny = lastDeny;
       try { var mh = window.__murtherAutoReverse; if (mh && mh.state) lock = mh.state.lockName || null; } catch (eL) {}
-      return { ready: READY, armed: armed, threshold: threshold, opKinds: ops, lock: lock, deny: deny };
+      return { ready: READY, armed: armed, threshold: threshold, opKinds: ops, lock: lock, deny: deny, own: lastOwn, foes: lastFoes };
     }
     function init() {
       /* Pin 2: guard on the factory alone. No blob check — the pasted factory
@@ -3366,6 +3381,26 @@ else if (typeof define === 'function' && define['amd'])
     }
     function pump() {
       try {
+        var m = null;
+        try { m = window.__murtherAutoReverse || null; } catch (eM) { m = null; }
+        if (!m || typeof m.snapshot !== 'function') return;
+        var snap;
+        try { snap = m.snapshot(); } catch (eS) { return; }
+        if (!snap) return;
+        /* Fix round 4: lifecycle edges + census run on EVERY pump, independent
+         * of the master switch and the WASM binary. Spawn/die are client-level
+         * facts the operator must see even with the feature off; own/foe
+         * counts feed status() so a blind scene reader is measurable instead
+         * of debatable. */
+        var ownN = 0, foeN = 0;
+        try { ownN = (snap.own && snap.own.length) || 0; foeN = (snap.foes && snap.foes.length) || 0; } catch (eC) {}
+        lastOwn = ownN; lastFoes = foeN;
+        var aliveNow = ownN > 0;
+        if (aliveNow !== wasAlive) {
+          wasAlive = aliveNow;
+          if (aliveNow) loud('spawned (' + ownN + ' own cells, ' + foeN + ' foes in view)', { own: ownN, foes: foeN });
+          else loud('died / spectating — press Play to rejoin', { foes: foeN });
+        }
         /* Fix round 2: the brain must never stay armed while the master switch
          * is off. The old early-return left a bind-armed core latched (no
          * expiry, no poll), so the send hook negated every tick forever and
@@ -3376,12 +3411,6 @@ else if (typeof define === 'function' && define['amd'])
           try { if (READY && F.is_armed && F.is_armed() === 1) { F.disarm(); armedAt = 0; lastEndAt = Date.now(); } } catch (eD) {}
           return;
         }
-        var m = null;
-        try { m = window.__murtherAutoReverse || null; } catch (eM) { m = null; }
-        if (!m || typeof m.snapshot !== 'function') return;
-        var snap;
-        try { snap = m.snapshot(); } catch (eS) { return; }
-        if (!snap) return;
         if (!READY) return;
         // 1. Build the owner-grouped cell list from the live scene.
         var cells = [], id = 1, i;
@@ -3409,8 +3438,7 @@ else if (typeof define === 'function' && define['amd'])
           try {
             if (F.arm(hashName(snap.lockName) || 2, key) === 1) {
               armedAt = now; lastArmedKey = key; armed = true; lastDeny = '';
-              diag('auto-reverse core: armed (auto) on "' + snap.lockName + '" x' + key);
-              betix('INFO', 'brain armed (auto)', { lock: snap.lockName, arKey: key });
+              loud('armed (auto) on "' + snap.lockName + '", threshold x' + key, { lock: snap.lockName, arKey: key });
             }
           } catch (eArm) { betix('ERROR', 'brain auto-arm failed', { err: String((eArm && eArm.message) || eArm) }); }
         }
@@ -3429,8 +3457,7 @@ else if (typeof define === 'function' && define['amd'])
         if (hit === 1) {
           var tx = out.getFloat32(0, true), ty = out.getFloat32(4, true), tc = out.getUint8(8);
           var mode = COUNT_MODE[tc] || '4x';
-          betix('INFO', 'brain confirmed', { count: tc, mode: mode, x: Math.round(tx), y: Math.round(ty) });
-          diag('auto-reverse core: CONFIRMED x' + tc + ' -> returning ' + mode);
+          loud('CONFIRMED x' + tc + ' -> returning ' + mode + ' at (' + Math.round(tx) + ',' + Math.round(ty) + ')', { count: tc, mode: mode, x: Math.round(tx), y: Math.round(ty) });
           try {
             m.state.lock = { x: tx, y: ty, m: 0, at: now, src: 'wasm' };
             m.state.lockName = snap.lockName || '';
@@ -3441,7 +3468,7 @@ else if (typeof define === 'function' && define['amd'])
           try { m.fireTrigger('wasm auto-trigger x' + tc, { aim: false }); } catch (eT) { betix('ERROR', 'brain return fanout failed', { count: tc }); }
           m.state.reverseMode = prev;
           armedAt = 0; lastEndAt = now;
-          betix('INFO', 'brain returned', { mode: firedMode });
+          loud('returned ' + firedMode + ' fanout, disarmed', { mode: firedMode });
         }
       } catch (e) {}
     }
@@ -3477,23 +3504,23 @@ else if (typeof define === 'function' && define['amd'])
            * lock, no arm — and stock fire would be equally invisible. Say so
            * once per press instead of dying silently like a broken brain. */
           lastDeny = 'spectating';
+          var foeS = 0;
+          try { foeS = (snap && snap.foes && snap.foes.length) || 0; } catch (eFC) {}
           try { toast('Auto Reverse: spectating — spawn first, then press'); } catch (eT) {}
-          diag('auto-reverse core: bind press while spectating — spawn first');
-          betix('INFO', 'brain bind-arm denied', { mode: mode, reason: 'spectating' });
+          loud('bind press denied (spectating, ' + foeS + ' foes in view) — spawn first', { mode: mode, foes: foeS });
           return false;
         }
         if (!snap.lockName) {
           lastDeny = 'no-lock';
-          diag('auto-reverse core: bind press found no target — get closer or hover the enemy, then press again');
-          betix('INFO', 'brain bind-arm denied', { mode: mode, reason: 'no-lock' });
+          try { toast('Auto Reverse: no target locked — get closer or hover the enemy'); } catch (eT2) {}
+          loud('bind press found no target (own=' + snap.own.length + ', foes=' + snap.foes.length + ') — get closer or hover, then press again', { mode: mode, own: snap.own.length, foes: snap.foes.length });
           return false;
         }
         var key = MODE_ARKEY[mode] || 0;
         if (!key) { lastDeny = 'bad-mode'; return false; }
         if (F.arm(hashName(snap.lockName) || 2, key) === 1) {
           armedAt = Date.now(); lastArmedKey = key; lastDeny = '';
-          diag('auto-reverse core: armed (bind ' + mode + ') on "' + snap.lockName + '"');
-          betix('INFO', 'brain armed (bind)', { lock: snap.lockName, mode: mode, arKey: key });
+          loud('armed (bind ' + mode + ') on "' + snap.lockName + '" — watching for x' + key, { lock: snap.lockName, mode: mode, arKey: key });
           return true;
         }
         lastDeny = 'arm-rejected';
@@ -14398,6 +14425,14 @@ function applyChatResize() {
       pendingJoinPick = want || null;   // verified against the game's own "Server:" readout once the join lands
       pendingJoinWas = srvNorm(netLastServer);
       nativeClick(b);
+      /* Fix round 4: session-start marker. Every Play press is logged with the
+       * picked server, unconditionally — the operator must see joins without
+       * screenshots or toggles. MX_BETIX is same-scope (runtime call). */
+      try {
+        var msg = 'Play clicked' + (want ? ' (server: ' + want + ')' : ' (quick join)');
+        try { console.log('[auto-reverse] ' + msg); } catch (eC) {}
+        try { MX_BETIX.log('INFO', msg, { server: want || null }); } catch (eB) {}
+      } catch (eP) {}
       // If the native menu hid itself, the join watcher closes our menu. If it did not
       // (network stall, locked name prompt…), keep our menu open and tell the user.
       setTimeout(function () {
