@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Murther — gota.io client
 // @namespace    murther.gota
-// @version      1.75.1
+// @version      1.75.2
 // @description  Murther - a full UI/UX replacement client for play.gota.io: a dark purple theme and a HUD reskin that HOSTS the live native panels (stats ID/Mass/Score/Cells top-centre, FPS/ping/server above the chat, leaderboard top-right, minimap, party, chat) so everything stays synced with the game; a native-synced server list with a verified pick -> join handshake; a clean name/mass leaderboard with an animated border that highlights your own row; searchable settings, themes and a full backup; client hotkeys with live write-through rebinding, chat macros and game-side action keys; and real performance controls (FPS cap / vsync governor, renderer resolution, reduce effects). A self-healing HUD keeps it honest: a state that would leave every panel hidden is reset once, with a toast, instead of blanking the screen. Feature rows explain themselves behind their own arrow (click it) instead of on hover - a category header is the only hover description left; the number on a category header is the real count of rows it is showing; Themes opens with Enable Custom Theme, which switches the client's whole custom look off and says so; Play and Spectate wear an animated white outline; and the profile card's particle field is fitted to the real device pixels, reacts to the pointer and demotes itself when frames get slow.
 // @description  Every release note and the full behavioural history live in the RELEASE HISTORY block below the header - the metadata above carries only the current feature set, so it can never go stale or outgrow a userscript manager's UI.
 // @author       Murther
@@ -827,6 +827,13 @@
 // Genuine refreshes (regions agree, list empty) still keep the old rows, and
 // __murther.serverCheck() now reports pill vs native region, per-tab keys and
 // fresh-vs-cached container identity, so one paste answers 'why' next time.
+// v1.75.2: C9 — third freeze family (latched window / foreign mode the blind
+// bind path could never clear). Every bind press now repairs foreign modes
+// and force-closes over-budget windows (true age logged); pump does R-toggle
+// expiry first, before any deny can skip it; report() gains a freeze block
+// naming the culprit. Adapted: age captured pre-reset, solo derived from
+// module reverseMode (R carries no solo flag), Betix via MX_BETIX (glue betix
+// out of scope at the dispatcher).
 // v1.75.1: C8 — simulate() arms the selected engine (was WASM-only, so the
 // forceJsFallback proof could never confirm). Returns engine: 'js'/'wasm';
 // burst evaluation is shared, so one proof covers the return path once per
@@ -2863,6 +2870,17 @@
         enabled: !!state.enabled, reverseMode: state.reverseMode, triggerMode: state.triggerMode,
         autoTriggerEnabled: !!state.autoTriggerEnabled, autoTriggerThreshold: state.autoTriggerThreshold || '4x',
         wasm: (typeof MX_AUTOREVERSE_CORE !== 'undefined' && MX_AUTOREVERSE_CORE.status) ? MX_AUTOREVERSE_CORE.status() : { ready: false, armed: false },
+        /* v1.74.22 PATCH C (C9): freeze diagnostics. After any future freeze,
+         * report().freeze names the culprit: mode !== 'reverse' = foreign hook
+         * mode latched; on with huge ageMs = our window latched; both false =
+         * not ours (check the send-hook stamp next). */
+        freeze: (function () {
+          try {
+            var R = mxRevObj(); if (!R) return { hook: false };
+            return { hook: true, mode: String(R.mode || 'reverse'), on: !!R.on,
+                     at: R.at || 0, ageMs: R.at ? (Date.now() - R.at) : -1 };
+          } catch (e) { return { hook: false }; }
+        })(),
         aimMode: state.autoAim, ticks: state.ticks, splits: state.splits,
         ignoredSplits: state.ignoredSplits, triggers: state.triggers,
         lastTriggerAt: state.lastTriggerAt, lastTriggerWhy: state.lastTriggerWhy,
@@ -3591,6 +3609,21 @@ else if (typeof define === 'function' && define['amd'])
     }
     function pump() {
       try {
+        /* v1.74.22 PATCH B (C9): housekeeping first. A deny path must never
+         * skip window expiry — on this WebGL box the deny fires every tick.
+         * R carries no solo flag (solo-ness lives in module reverseMode), so
+         * the budget derives it from the module handle when reachable. */
+        try {
+          var Rh = mxRevObj();
+          if (Rh && Rh.on && Rh.at) {
+            var soloW = false;
+            try { var msw = window.__murtherAutoReverse; soloW = !!(msw && msw.state && msw.state.reverseMode === 'solo64x'); } catch (eSW) {}
+            var wMs = 380, sMs = 620;
+            try { wMs = Math.max(120, S.otorev.reverseWindowMs | 0); } catch (eW) {}
+            try { sMs = Math.max(200, S.otorev.soloHoldMs | 0); } catch (eS2) {}
+            if (Date.now() - Rh.at > (soloW ? sMs : wMs) + 250) Rh.on = false;
+          }
+        } catch (eHk) {}
         var m = null;
         try { m = window.__murtherAutoReverse || null; } catch (eM) { m = null; }
         if (!m || typeof m.snapshot !== 'function') return;
@@ -13715,6 +13748,26 @@ function applyChatResize() {
    * (the enemy's confirming multi-split returns the matching fanout); otherwise
    * the stock immediate fanout. autoReverseFire stays the brain's RETURN path. */
   function autoReverseBindPress(mode) {
+    /* v1.74.22 PATCH A (C9): every bind press is an escape hatch. Repair any
+     * foreign freeze/mirror mode first, then force-close a reverse window
+     * that outlived its budget — so the initiating hotkey can always release
+     * its own freeze. MX_BETIX is used directly: the glue's betix() helper
+     * is not in this scope. */
+    try {
+      var R0 = mxRevObj();
+      if (R0) {
+        try { mxReverseRepair(); } catch (eR) {}
+        var wMs = 380, sMs = 620;
+        try { wMs = Math.max(120, S.otorev.reverseWindowMs | 0); } catch (eW) {}
+        try { sMs = Math.max(200, S.otorev.soloHoldMs | 0); } catch (eS2) {}
+        if (R0.on && R0.at && (Date.now() - R0.at) > (wMs + sMs + 1500)) {
+          var stuckMs = Date.now() - R0.at;
+          R0.on = false; R0.at = Date.now();
+          try { MX_BETIX.log('ERROR', 'stuck reverse window force-closed by bind press', { ageMs: stuckMs }); } catch (eB2) {}
+          try { console.log('[murther] stuck reverse window force-closed'); } catch (eC) {}
+        }
+      }
+    } catch (eH) {}
     /* Fix round 2: never arm the brain while the master switch is off. The
      * pump does not run when disabled, so a bind-arm would latch forever
      * (send hook negating every tick = frozen cell). Straight to stock. */
