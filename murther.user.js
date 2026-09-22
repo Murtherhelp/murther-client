@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Murther — gota.io client
 // @namespace    murther.gota
-// @version      1.74.21
+// @version      1.75.0
 // @description  Murther - a full UI/UX replacement client for play.gota.io: a dark purple theme and a HUD reskin that HOSTS the live native panels (stats ID/Mass/Score/Cells top-centre, FPS/ping/server above the chat, leaderboard top-right, minimap, party, chat) so everything stays synced with the game; a native-synced server list with a verified pick -> join handshake; a clean name/mass leaderboard with an animated border that highlights your own row; searchable settings, themes and a full backup; client hotkeys with live write-through rebinding, chat macros and game-side action keys; and real performance controls (FPS cap / vsync governor, renderer resolution, reduce effects). A self-healing HUD keeps it honest: a state that would leave every panel hidden is reset once, with a toast, instead of blanking the screen. Feature rows explain themselves behind their own arrow (click it) instead of on hover - a category header is the only hover description left; the number on a category header is the real count of rows it is showing; Themes opens with Enable Custom Theme, which switches the client's whole custom look off and says so; Play and Spectate wear an animated white outline; and the profile card's particle field is fitted to the real device pixels, reacts to the pointer and demotes itself when frames get slow.
 // @description  Every release note and the full behavioural history live in the RELEASE HISTORY block below the header - the metadata above carries only the current feature set, so it can never go stale or outgrow a userscript manager's UI.
 // @author       Murther
@@ -827,6 +827,12 @@
 // Genuine refreshes (regions agree, list empty) still keep the old rows, and
 // __murther.serverCheck() now reports pill vs native region, per-tab keys and
 // fresh-vs-cached container identity, so one paste answers 'why' next time.
+// v1.75.0: Step 6 cleanup. Pure-JS fallback engine (MX_AUTOREVERSE_JS) with the
+// same arm/feed contract as the core, fed by snapshot counts, returned through
+// the shared fireReturn path (identical onAutoReverse records); engine
+// selection per tick (WASM when ready, JS when absent/forced); snapshot()
+// gains per-owner counts; echo var + orphan generic-owner code deleted; arm
+// lifecycle consolidated into AR_STATE; emitter audit (one per event).
 // v1.74.21: audit round C7 (freeze is ours). PATCH 1: fireTrigger gains
 // noWindow — fanout without window/toggle/aim-rewrite. PATCH 2: blind presses
 // become fanout-only via stockSplitOnly (the old fall-through negated ticks
@@ -2675,7 +2681,24 @@
       } catch (eF) {}
       var lockName = '';
       try { lockName = state.lockName || ''; } catch (eL) {}
-      return { own: own, foes: foes, lockName: lockName };
+      /* S6-2: per-owner counts for the pure-JS fallback feed, built from the
+       * same walk as foes so brain and fallback share one reader and one
+       * truth: { ownerHash: { n, bigX, bigY } } with biggest-mass coords. The
+       * FNV here mirrors the glue's hashName across the IIFE boundary — keep
+       * the normalization identical (lowercase, collapsed spaces, || 2). */
+      var counts = {};
+      try {
+        for (var ci = 0; ci < foes.length; ci++) {
+          var fn2 = String(foes[ci].name || '').toLowerCase().replace(/\s+/g, ' ').trim();
+          var fh = 2166136261, hi;
+          for (hi = 0; hi < fn2.length; hi++) { fh ^= fn2.charCodeAt(hi); fh = Math.imul(fh, 16777619); }
+          fh = (fh >>> 0) || 2;
+          var g = counts[fh] || (counts[fh] = { n: 0, bigX: 0, bigY: 0, bigM: -1 });
+          g.n++;
+          if (foes[ci].m > g.bigM) { g.bigM = foes[ci].m; g.bigX = foes[ci].x; g.bigY = foes[ci].y; }
+        }
+      } catch (eC2) {}
+      return { own: own, foes: foes, lockName: lockName, counts: counts };
     }
     function aimTick(dv) {
       if (state.autoAim === 'off' || !state.lock) return false;
@@ -3278,10 +3301,8 @@ else if (typeof define === 'function' && define['amd'])
    * Deterministic Auto Reverse brain. The C++ core is the Step 2-4 deliverable
    * (core.cpp plus its ABI header abi.h) and is built with build_core.sh to a
    * single-file Emscripten factory script (the core build output), pasted
-   * verbatim directly above the MX_AUTOREVERSE_CORE block. MX_AUTOREVERSE_WASM_B64
-   * below is an inert diagnostic echo only — never read, never a paste
-   * target. No external runtime is referenced or required here; the core is
-   * a pure state machine
+   * verbatim directly above the fallback module. No external runtime is
+   * referenced or required here; the core is a pure state machine
    * (armed -> watching -> confirmed -> reset) over owner-grouped cells.
    *
    * Division of labour (deliberate):
@@ -3295,24 +3316,60 @@ else if (typeof define === 'function' && define['amd'])
    *    guesses. A future 0x02 frame decoder can feed push_cells directly.
    * Without a pasted binary the module stays inert (status().ready === false)
    * and every manual bind plus the plain reverse keeps working unchanged. */
-  /* Step 5 completion pin 2: one artifact, one guard. The SINGLE_FILE+MODULARIZE
-   * factory script (pasted verbatim above MX_AUTOREVERSE_CORE) already carries
-   * the bytes, so the blob below is a diagnostic echo only — never a second
-   * source of truth, never read by init(). */
-  var MX_AUTOREVERSE_WASM_B64 = '';
+  /* Step 6: pure-JS Auto Reverse fallback. Engages only when the WASM brain
+   * reports ready === false (or forceJsFallback is set for the proof run).
+   * Same contract as the core — arm(ownerHash, arKey, now),
+   * feed(snap, now, windowMs) -> null|{count,x,y} — consuming the same
+   * owner-grouped snapshot (snap.counts, S6-2). Piece thresholds mirror the
+   * core via a local table (arKey -> pieces); the glue maps arKeys identically
+   * on both engines. No OCR, no wire guesses, no new state beyond its four
+   * fields. */
+  var MX_AUTOREVERSE_JS = (function () {
+    var WATCH_BUDGET_MULT = 4; // watch budget = reverseWindowMs * 4
+    var JS_PIECES = { 1: 1, 2: 4, 3: 8, 4: 16, 5: 64, 6: 64 }; // arKey -> pieces, mirrors ARKEY_PIECES
+    var armed = false, owner = -1, key = 0, armedAt = 0;
+    function arm(ownerHash, arKey, now) {
+      owner = ownerHash; key = arKey; armedAt = now; armed = true;
+    }
+    function disarm() { armed = false; owner = -1; key = 0; }
+    function feed(snap, now, windowMs) {
+      if (!armed) return null;
+      if (now - armedAt > (windowMs || 380) * WATCH_BUDGET_MULT) { disarm(); return null; }
+      var c = snap && snap.counts ? snap.counts[owner] : null;
+      if (!c) return null;
+      if (c.n >= (JS_PIECES[key] || 4)) {
+        var out = { count: c.n, x: c.bigX, y: c.bigY };
+        disarm();
+        return out;
+      }
+      return null;
+    }
+    return {
+      arm: arm,
+      disarm: disarm,
+      feed: feed,
+      status: function () { return { armed: armed, owner: owner, key: key }; }
+    };
+  })();
   var MX_AUTOREVERSE_CORE = (function () {
     var READY = false, MOD = null, F = {};
     var CELL_SZ = 24; // sizeof(Cell): u32 id, u32 owner, f32 x, f32 y, f32 r, u8 me + 3 pad
     var cellPtr = 0, cellCap = 0, outPtr = 0;
-    var armedAt = 0, lastArmedKey = 0, lastEndAt = 0, lastDeny = '', noBinLogged = false;
-    var armedOwner = -1, armedName = '', epLogged = false;
+    var armedAt = 0, lastArmedKey = 0, noBinLogged = false;
+    var armedOwner = -1, armedName = '';
     var wasAlive = false, lastOwn = 0, lastFoes = 0;
-    /* Fix round 1: REARM_COOLDOWN_MS. Expiry used to re-arm on the very next
-     * 100 ms pump while a lock lived, holding tick-reversal ~permanently and
-     * freezing the cell. Auto-arm now waits this long after any window end. */
+    /* S6-4: one commented object owns the whole arm lifecycle that used to be
+     * five scattered scalars (deny / episode latch / window-end / cooldown /
+     * simulate window). deny = last deny reason (status surface); ep =
+     * episode-logged latch (one arm line per episode, reset on every disarm);
+     * endAt = last window end (cooldown gate); coolMs = re-arm cooldown
+     * (expiry used to re-arm on the very next 100 ms pump, holding
+     * tick-reversal ~permanently and freezing the cell); simUntil = simulate
+     * proof window holding the count-source gate open. */
+    var AR_STATE = { deny: '', ep: false, endAt: 0, coolMs: 1500, simUntil: 0 };
+    var AR = AR_STATE;
     var opSeen = {};
     var THRESH_ARKEY = { '4x': 2, '8x': 3, '16x': 4, '64x': 5 };
-    var REARM_COOLDOWN_MS = 1500;
     /* Return fanout map. 32 is unreachable (no 32x initiator exists; Penta is
      * dispatch-only per the panels) and stays only as a defensive entry: a
      * 32-confirmation implies at-least-Penta, so overshoot to the Hexa fanout
@@ -3335,10 +3392,7 @@ else if (typeof define === 'function' && define['amd'])
     var BURST_MS = 800;
     var BURST_OWNERS_INFRA = 3;
     var POOLED_NUMERIC = /^[0-9][0-9.,]*[kKmM%]?$/;
-    var lastBurstTs = 0, fillsRecent = 0, armedOwner = -1;
-    /* v1.74.21 PATCH 3 (C7): simUntil satisfies the count-source gate during a
-     * simulate proof so the deny block stays silent for the evidence run. */
-    var simUntil = 0;
+    var lastBurstTs = 0, fillsRecent = 0;
     var nameByHash = {};
     /* Fix round 1b: the global Diagnostics logging row was removed in v1.63.1
      * and load() hard-wires diagLog off, so mxDiag alone can never show brain
@@ -3384,11 +3438,20 @@ else if (typeof define === 'function' && define['amd'])
       try { for (var k in opSeen) ops++; } catch (eO) {}
       /* Fix round 3: lock + deny surface. The console block alone never says
        * WHY an arm did not happen; these two fields do. */
-      var lock = null, deny = lastDeny;
+      var lock = null, deny = AR.deny;
       try { var mh = window.__murtherAutoReverse; if (mh && mh.state) lock = mh.state.lockName || null; } catch (eL) {}
       var live = false;
       try { live = (typeof inLiveSession === 'function') ? !!inLiveSession() : (lastOwn > 0); } catch (eLV) {}
-      return { ready: READY, armed: armed, threshold: threshold, opKinds: ops, lock: lock, deny: deny, own: lastOwn, foes: lastFoes, live: live, fills: fillsRecent, owner: armedOwner };
+      /* Step 6: engine surface. jsArmed mirrors the fallback so the proof run
+       * is observable without touching the WASM path. */
+      var eng = 'wasm', jsArmed = false;
+      try {
+        var mh2 = window.__murtherAutoReverse;
+        if (!READY) eng = 'js';
+        else if (mh2 && mh2.forceJsFallback === true) eng = 'js';
+        jsArmed = MX_AUTOREVERSE_JS.status().armed;
+      } catch (eE) {}
+      return { ready: READY, armed: armed, threshold: threshold, opKinds: ops, lock: lock, deny: deny, own: lastOwn, foes: lastFoes, live: live, fills: fillsRecent, owner: armedOwner, engine: eng, jsArmed: jsArmed };
     }
     function init() {
       /* Pin 2: guard on the factory alone. No blob check — the pasted factory
@@ -3520,7 +3583,7 @@ else if (typeof define === 'function' && define['amd'])
         catch (eT) { betix('ERROR', 'brain return fanout failed', { count: tc }); }
         try { if (prev !== null) m.state.reverseMode = prev; } catch (eR) {}
       }
-      armedAt = 0; lastEndAt = now; armedOwner = -1; armedName = ''; epLogged = false;
+      armedAt = 0; AR.endAt = now; armedOwner = -1; armedName = ''; AR.ep = false;
       loud('returned ' + firedMode + ' fanout, disarmed', { mode: firedMode });
     }
     function pump() {
@@ -3557,106 +3620,127 @@ else if (typeof define === 'function' && define['amd'])
         var masterOn = false;
         try { masterOn = !!(typeof S !== 'undefined' && S && S.otorev && S.otorev.enabled); } catch (eMO) {}
         if (!masterOn) {
-          try { if (READY && F.is_armed && F.is_armed() === 1) { F.disarm(); armedAt = 0; lastEndAt = Date.now(); armedOwner = -1; armedName = ''; epLogged = false; } } catch (eD) {}
+          /* Step 6: disarm BOTH engines — a mid-arm engine switch must never latch. */
+          try { if (F.is_armed && F.is_armed() === 1) F.disarm(); } catch (eD) {}
+          try { MX_AUTOREVERSE_JS.disarm(); } catch (eD2) {}
+          try { armedAt = 0; AR.endAt = Date.now(); armedOwner = -1; armedName = ''; AR.ep = false; } catch (eD3) {}
           return;
         }
-        if (!READY) return;
-        // 1. Build the owner-grouped cell list from the live scene.
+        /* Step 6: engine selection happens here, before any engine call, so the
+         * pure-JS fallback runs with no factory present (the old
+         * `if (!READY) return` gate would have killed it). */
+        var useJs = false;
+        try { useJs = !READY || (m.forceJsFallback === true); } catch (eUJ) { useJs = !READY; }
+        // 1. Build the owner-grouped cell list from the live scene (WASM engine
+        //    only — the fallback reads snap.counts instead; pushCells self-guards).
         var cells = [], id = 1, i;
-        for (i = 0; i < snap.own.length; i++) {
-          cells.push({ id: id++, owner: 1, x: snap.own[i].x, y: snap.own[i].y, m: snap.own[i].m, me: 1 });
+        if (!useJs) {
+          for (i = 0; i < snap.own.length; i++) {
+            cells.push({ id: id++, owner: 1, x: snap.own[i].x, y: snap.own[i].y, m: snap.own[i].m, me: 1 });
+          }
+          for (i = 0; i < snap.foes.length; i++) {
+            cells.push({ id: id++, owner: hashName(snap.foes[i].name) || 2, x: snap.foes[i].x, y: snap.foes[i].y, m: snap.foes[i].m, me: 0 });
+          }
+          if (cells.length) pushCells(cells);
         }
-        for (i = 0; i < snap.foes.length; i++) {
-          cells.push({ id: id++, owner: hashName(snap.foes[i].name) || 2, x: snap.foes[i].x, y: snap.foes[i].y, m: snap.foes[i].m, me: 0 });
-        }
-        if (cells.length) pushCells(cells);
         // 2. Reactive auto-arm: a live lock + the master switch arms the core on
         //    the threshold key. Bind presses arm through armFromBind, never here.
         var armed = false;
-        try { armed = F.is_armed() === 1; } catch (eA) { armed = false; }
+        try { armed = useJs ? MX_AUTOREVERSE_JS.status().armed : (F.is_armed() === 1); } catch (eA) { armed = false; }
         var now = Date.now();
         /* Fix round 3: refresh the lock when missing. The pump only ever read a
          * lock born elsewhere; with Auto-Trigger on and nobody splitting yet,
          * no lock is ever born. Radius/cursor acquisition runs here so watching
          * starts the moment an enemy walks into radius. */
-        if (!armed && S.otorev.autoTriggerEnabled && !snap.lockName && (now - lastEndAt) > REARM_COOLDOWN_MS) {
+        if (!armed && S.otorev.autoTriggerEnabled && !snap.lockName && (now - AR.endAt) > AR.coolMs) {
           try { if (typeof m.acquireLock === 'function') { m.acquireLock(false); snap = m.snapshot() || snap; } } catch (eAL) {}
         }
-        if (!armed && S.otorev.autoTriggerEnabled && snap.lockName && (now - lastEndAt) > REARM_COOLDOWN_MS) {
+        if (!armed && S.otorev.autoTriggerEnabled && snap.lockName && (now - AR.endAt) > AR.coolMs) {
           var key = THRESH_ARKEY[S.otorev.autoTriggerThreshold] || 2;
+          var okArm = false;
           try {
-            if (F.arm(hashName(snap.lockName) || 2, key) === 1) {
-              armedAt = now; lastArmedKey = key; armedOwner = hashName(snap.lockName) || 2; armedName = snap.lockName || ''; armed = true; lastDeny = '';
-              if (!epLogged) { epLogged = true; loud('armed (auto) on "' + snap.lockName + '", threshold x' + key, { lock: snap.lockName, arKey: key }); }
-            }
-          } catch (eArm) { betix('ERROR', 'brain auto-arm failed', { err: String((eArm && eArm.message) || eArm) }); }
+            if (useJs) { MX_AUTOREVERSE_JS.arm(hashName(snap.lockName) || 2, key, now); okArm = MX_AUTOREVERSE_JS.status().armed; }
+            else okArm = (F.arm(hashName(snap.lockName) || 2, key) === 1);
+          } catch (eArm2) { okArm = false; }
+          if (okArm) {
+            try {
+              armedAt = now; lastArmedKey = key; armedOwner = hashName(snap.lockName) || 2; armedName = snap.lockName || ''; armed = true; AR.deny = '';
+              if (!AR.ep) { AR.ep = true; loud('armed (auto) on "' + snap.lockName + '", threshold x' + key, { lock: snap.lockName, arKey: key }); }
+            } catch (eArm) { betix('ERROR', 'brain auto-arm failed', { err: String((eArm && eArm.message) || eArm) }); }
+          }
         }
         /* Audit blind-arm honesty fix: the generic watch promised confirms the
          * data path cannot deliver, and re-armed every cooldown cycle for
          * pure log churn. Until wire ownership is decoded, a blind scene
-         * denies honestly (once per lastDeny state, not per pump) and no
+         * denies honestly (once per AR.deny state, not per pump) and no
          * arm is ever issued here. */
-        if (!armed && S.otorev.autoTriggerEnabled && ownN === 0 && foeN === 0 && (now - lastEndAt) > REARM_COOLDOWN_MS) {
+        if (!armed && S.otorev.autoTriggerEnabled && ownN === 0 && foeN === 0 && (now - AR.endAt) > AR.coolMs) {
           var liveG = false;
           try { liveG = (typeof inLiveSession === 'function') ? !!inLiveSession() : false; } catch (eLG) {}
           /* PATCH 3: a running simulate proof holds the gate open — the burst
            * it injected IS the count source. Keeps the evidence array clean. */
-          if (liveG && simUntil <= now && lastDeny !== 'reader-blind') {
-            lastDeny = 'reader-blind';
+          if (liveG && AR.simUntil <= now && AR.deny !== 'reader-blind') {
+            AR.deny = 'reader-blind';
             betix('INFO', 'auto-trigger denied: no count source (scene blind, wire ownership undecoded yet)', {});
           }
         }
         // 3. The arm window is bounded by the existing reverseWindowMs setting so a
         //    watched enemy that never splits cannot hold the reverse forever.
         if (armed && armedAt && (now - armedAt) > (S.otorev.reverseWindowMs || 380)) {
-          try { F.disarm(); } catch (eD) {}
-          armed = false; armedAt = 0; lastEndAt = now; armedOwner = -1; armedName = ''; epLogged = false;
+          try { if (useJs) MX_AUTOREVERSE_JS.disarm(); else F.disarm(); } catch (eD) {}
+          armed = false; armedAt = 0; AR.endAt = now; armedOwner = -1; armedName = ''; AR.ep = false;
           diag('auto-reverse core: window expired, disarmed');
         }
-        // 4. Poll the core; on confirmation aim at the biggest piece and fan out.
-        var out = new DataView(MOD.HEAPU8.buffer, outPtr, 12);
-        out.setFloat32(0, 0, true); out.setFloat32(4, 0, true); out.setUint8(8, 0);
-        var hit = 0;
-        try { hit = F.pop_action(outPtr, outPtr + 4, outPtr + 8); } catch (eP) { hit = 0; }
-        if (hit === 1) {
-          var tx = out.getFloat32(0, true), ty = out.getFloat32(4, true), tc = out.getUint8(8);
-          try {
-            m.state.lock = { x: tx, y: ty, m: 0, at: now, src: 'wasm' };
-            m.state.lockName = snap.lockName || '';
-          } catch (eL) {}
-          fireReturn(tc, snap.lockName || '');
-        }
-        /* Fix round 5: burst path. Same armed window, no coordinates needed —
-         * a concentrated birth burst for the watched owner (or anyone, when
-         * generically armed) confirms exactly like an absolute count. */
-        else if (armed) {
-          var burst = scanBursts(now);
-          fillsRecent = burst.fills;
-          if (burst.infra) {
-            diag('burst skipped: multi-owner infra event (font load?)');
-          } else {
-            var need = KEY_NEED[lastArmedKey] || 5;
-            var needP = ARKEY_PIECES[lastArmedKey] || 4;
-            var best = -1, bestN = 0, bo;
-            for (bo in burst.counts) {
-              if (armedOwner !== 0 && Number(bo) !== armedOwner) continue;
-              if (burst.counts[bo] > bestN) { bestN = burst.counts[bo]; best = bo; }
-            }
-            if (bestN >= need && best >= 0) {
-              fireReturn(needP, (armedOwner === 0 ? 'any: ' : '') + (nameByHash[best] || ('owner#' + best)));
-            }
-          }
+        // 4. Evaluate per selected engine (Step 6: WASM core or pure-JS
+        //    fallback). The burst scan runs once per tick for both engines so
+        //    the fills diagnostic and watermark stay fresh either way.
+        var burst = scanBursts(now);
+        fillsRecent = burst.fills;
+        var fired = false;
+        if (useJs) {
+          var fr = null;
+          try { fr = MX_AUTOREVERSE_JS.feed(snap, now, (S.otorev.reverseWindowMs || 380)); } catch (eFD) {}
+          if (fr) { fireReturn(fr.count, armedName || ''); fired = true; }
         } else {
-          fillsRecent = scanBursts(now).fills;
+          var out = new DataView(MOD.HEAPU8.buffer, outPtr, 12);
+          out.setFloat32(0, 0, true); out.setFloat32(4, 0, true); out.setUint8(8, 0);
+          var hit = 0;
+          try { hit = F.pop_action(outPtr, outPtr + 4, outPtr + 8); } catch (eP) { hit = 0; }
+          if (hit === 1) {
+            var tx = out.getFloat32(0, true), ty = out.getFloat32(4, true), tc = out.getUint8(8);
+            try {
+              m.state.lock = { x: tx, y: ty, m: 0, at: now, src: 'wasm' };
+              m.state.lockName = snap.lockName || '';
+            } catch (eL) {}
+            fireReturn(tc, snap.lockName || '');
+            fired = true;
+          }
+        }
+        /* Shared burst evaluation (both engines): concentrated birth bursts
+         * confirm exactly like absolute counts. S6-3: generic owner-0 arms are
+         * no longer issued, so the filter is a plain owner match. */
+        if (!fired && armed && !burst.infra) {
+          var need = KEY_NEED[lastArmedKey] || 5;
+          var needP = ARKEY_PIECES[lastArmedKey] || 4;
+          var best = -1, bestN = 0, bo;
+          for (bo in burst.counts) {
+            if (Number(bo) !== armedOwner) continue;
+            if (burst.counts[bo] > bestN) { bestN = burst.counts[bo]; best = bo; }
+          }
+          if (bestN >= need && best >= 0) {
+            fireReturn(needP, nameByHash[best] || ('owner#' + best));
+          }
+        } else if (!fired && armed && burst.infra) {
+          diag('burst skipped: multi-owner infra event (font load?)');
         }
       } catch (e) {}
     }
     function syncSettings() {
       try {
-        if (!READY) return;
         var on = false;
         try { on = !!(S && S.otorev && S.otorev.enabled && S.otorev.autoTriggerEnabled); } catch (eS) {}
-        if (!on) { try { F.disarm(); } catch (eD) {} armedAt = 0; armedOwner = -1; armedName = ''; epLogged = false; }
+        /* Step 6: disarm BOTH engines — a mid-arm engine switch must never latch. */
+        if (!on) { try { F.disarm(); } catch (eD) {} try { MX_AUTOREVERSE_JS.disarm(); } catch (eD2) {} armedAt = 0; armedOwner = -1; armedName = ''; AR.ep = false; }
       } catch (e) {}
     }
     function ready() { return READY; }
@@ -3669,10 +3753,14 @@ else if (typeof define === 'function' && define['amd'])
      * lockName was stale-or-empty and both arm paths died silently. */
     function armFromBind(mode) {
       try {
-        if (!READY) return false;
         var m = null;
         try { m = window.__murtherAutoReverse || null; } catch (eM) { m = null; }
-        if (!m || typeof m.snapshot !== 'function') { lastDeny = 'no-module'; return false; }
+        if (!m || typeof m.snapshot !== 'function') { AR.deny = 'no-module'; return false; }
+        /* Step 6: engine selection mirrors the pump — WASM when ready, pure-JS
+         * fallback when the factory is absent or forced. No READY gate here:
+         * the fallback arms with no binary present. */
+        var useJsB = false;
+        try { useJsB = !READY || (m.forceJsFallback === true); } catch (eUJB) { useJsB = !READY; }
         /* Acquire first: radius rule, cursor sources and fallback exactly as
          * the stock path would. Silent (no verbose ping) — the arm line below
          * is the record. */
@@ -3687,7 +3775,7 @@ else if (typeof define === 'function' && define['amd'])
           var liveNow = false;
           try { liveNow = (typeof inLiveSession === 'function') ? !!inLiveSession() : false; } catch (eLV) {}
           if (!liveNow) {
-            lastDeny = 'spectating';
+            AR.deny = 'spectating';
             var foeS = 0;
             try { foeS = (snap && snap.foes && snap.foes.length) || 0; } catch (eFC) {}
             try { toast('Auto Reverse: spectating — spawn first, then press'); } catch (eT) {}
@@ -3695,32 +3783,37 @@ else if (typeof define === 'function' && define['amd'])
             return false;
           }
           var key = MODE_ARKEY[mode] || 0;
-          if (!key) { lastDeny = 'bad-mode'; return false; }
+          if (!key) { AR.deny = 'bad-mode'; return false; }
           /* Audit blind-arm honesty fix: the generic watch promised confirms
            * the data path cannot deliver (blind scene, wire ownership
            * undecoded). Deny honestly until a count source exists; the
            * dispatcher falls through to the stock fanout + reverse, so manual
            * play works everywhere and only the automatic watch refuses. */
-          lastDeny = 'reader-blind';
+          AR.deny = 'reader-blind';
           try { toast('Auto Reverse: blind scene — split only, no reverse window, auto-watch parked'); } catch (eT3) {}
           loud('bind press denied (reader-blind: blind scene, wire ownership undecoded) — fanout-only stock', { mode: mode });
           return false;
         }
         if (!snap.lockName) {
-          lastDeny = 'no-lock';
+          AR.deny = 'no-lock';
           try { toast('Auto Reverse: no target locked — get closer or hover the enemy'); } catch (eT2) {}
           loud('bind press found no target (own=' + snap.own.length + ', foes=' + snap.foes.length + ') — get closer or hover, then press again', { mode: mode, own: snap.own.length, foes: snap.foes.length });
           return false;
         }
         var key = MODE_ARKEY[mode] || 0;
-        if (!key) { lastDeny = 'bad-mode'; return false; }
-        if (F.arm(hashName(snap.lockName) || 2, key) === 1) {
-          armedAt = Date.now(); lastArmedKey = key; armedOwner = hashName(snap.lockName) || 2; armedName = snap.lockName || ''; lastDeny = '';
+        if (!key) { AR.deny = 'bad-mode'; return false; }
+        var uh = hashName(snap.lockName) || 2, okB = false;
+        try {
+          if (useJsB) { MX_AUTOREVERSE_JS.arm(uh, key, Date.now()); okB = MX_AUTOREVERSE_JS.status().armed; }
+          else okB = (F.arm(uh, key) === 1);
+        } catch (eAB) { okB = false; }
+        if (okB) {
+          armedAt = Date.now(); lastArmedKey = key; armedOwner = uh; armedName = snap.lockName || ''; AR.deny = '';
           loud('armed (bind ' + mode + ') on "' + snap.lockName + '" — watching for x' + key, { lock: snap.lockName, mode: mode, arKey: key });
           return true;
         }
-        lastDeny = 'arm-rejected';
-      } catch (e) { lastDeny = 'exception'; betix('ERROR', 'brain bind-arm failed', { mode: mode }); }
+        AR.deny = 'arm-rejected';
+      } catch (e) { AR.deny = 'exception'; betix('ERROR', 'brain bind-arm failed', { mode: mode }); }
       return false;
     }
     /* F5: dev-gated synthetic burst injector. Console only, no menu surface.
@@ -3742,13 +3835,13 @@ else if (typeof define === 'function' && define['amd'])
          * burst evaluator matches it like any enemy) and hold the count-source
          * gate open for the proof window. Simulates on a blind build with no
          * live enemy: arm → CONFIRMED → return → disarm, end to end. */
-        simUntil = now + 2500;
+        AR.simUntil = now + 2500;
         var key = 2, ho = 2;
         try { key = THRESH_ARKEY[(typeof S !== 'undefined' && S.otorev && S.otorev.autoTriggerThreshold) || '4x'] || 2; } catch (eK) {}
         try { ho = hashName(name) || 2; } catch (eH) {}
         try {
           if (F.arm(ho, key) === 1) {
-            armedAt = now; lastArmedKey = key; armedOwner = ho; armedName = name.substring(0, 24); lastDeny = ''; epLogged = false;
+            armedAt = now; lastArmedKey = key; armedOwner = ho; armedName = name.substring(0, 24); AR.deny = ''; AR.ep = false;
           } else {
             return { ok: false, why: 'arm failed' };
           }
