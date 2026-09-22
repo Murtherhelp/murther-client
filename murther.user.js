@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Murther — gota.io client
 // @namespace    murther.gota
-// @version      1.74.20
+// @version      1.74.21
 // @description  Murther - a full UI/UX replacement client for play.gota.io: a dark purple theme and a HUD reskin that HOSTS the live native panels (stats ID/Mass/Score/Cells top-centre, FPS/ping/server above the chat, leaderboard top-right, minimap, party, chat) so everything stays synced with the game; a native-synced server list with a verified pick -> join handshake; a clean name/mass leaderboard with an animated border that highlights your own row; searchable settings, themes and a full backup; client hotkeys with live write-through rebinding, chat macros and game-side action keys; and real performance controls (FPS cap / vsync governor, renderer resolution, reduce effects). A self-healing HUD keeps it honest: a state that would leave every panel hidden is reset once, with a toast, instead of blanking the screen. Feature rows explain themselves behind their own arrow (click it) instead of on hover - a category header is the only hover description left; the number on a category header is the real count of rows it is showing; Themes opens with Enable Custom Theme, which switches the client's whole custom look off and says so; Play and Spectate wear an animated white outline; and the profile card's particle field is fitted to the real device pixels, reacts to the pointer and demotes itself when frames get slow.
 // @description  Every release note and the full behavioural history live in the RELEASE HISTORY block below the header - the metadata above carries only the current feature set, so it can never go stale or outgrow a userscript manager's UI.
 // @author       Murther
@@ -827,7 +827,12 @@
 // Genuine refreshes (regions agree, list empty) still keep the old rows, and
 // __murther.serverCheck() now reports pill vs native region, per-tab keys and
 // fresh-vs-cached container identity, so one paste answers 'why' next time.
-// v1.74.20: audit round (F1/F2/F4/F5/F7). simulate() re-exposed on window +
+// v1.74.21: audit round C7 (freeze is ours). PATCH 1: fireTrigger gains
+// noWindow — fanout without window/toggle/aim-rewrite. PATCH 2: blind presses
+// become fanout-only via stockSplitOnly (the old fall-through negated ticks
+// for the whole window = the freeze). PATCH 3: simulate arms directly on the
+// synthetic owner + simUntil holds the deny gate for the proof window.
+//
 // module handle (IIFE scope was console-unreachable); blind-scene generic arm
 // removed — auto path denies honestly until wire ownership is decoded, bind
 // path falls through to stock; auto-arm episodes log once; fireReturn emits
@@ -2775,9 +2780,14 @@
       /* v1.54.1: a bind press that wants aim locks it HERE, through the call - never parked on state, so a throw can no longer latch it on. */
       if (opts && opts.aim && state.autoAim !== 'off') { try { acquireLock('bind press'); } catch (eAim) { state.errors++; } }
       var windowMs = (state.reverseMode === 'solo64x') ? state.soloHoldMs : state.reverseWindowMs;
-      var prevUntil = state.windowUntil;
-      state.windowUntil = Date.now() + windowMs;
-      if (!prevUntil) { try { var R = window.__murtherReverse; if (R) state.manualOn = !!R.on; } catch (e) {} }
+      /* v1.74.21 PATCH 1 (C7): noWindow opens no reverse window and flips no
+       * toggle — fanout only. Legacy callers pass no opts and behave exactly
+       * as before (window + toggle + timer). */
+      if (!opts || !opts.noWindow) {
+        var prevUntil = state.windowUntil;
+        state.windowUntil = Date.now() + windowMs;
+        if (!prevUntil) { try { var R = window.__murtherReverse; if (R) state.manualOn = !!R.on; } catch (e) {} }
+      }
       /* v1.54.1: mode -> SPLIT-PRESS count, mapped ONCE (the old code mapped it here AND
        * again inside fanout, so 64x collapsed to 4 presses and 8x fired 4 presses at a
        * 16-cell cap). Presses double the cells: 1/2/3/4/6 presses reach 2/4/8/16/64.
@@ -2788,18 +2798,20 @@
             : state.reverseMode === 'solo64x' ? 6 : 1;
       if (n > 1) { try { fanout(n); } catch (e) {} }
       if (state.verbose) { try { console.log('[Auto Reverse] trigger:', why, '->', state.reverseMode, '(' + n + ' split press' + (n === 1 ? '' : 'es') + '),', windowMs + 'ms window'); } catch (e2) {} }
-      try {
-        var R2 = window.__murtherReverse = window.__murtherReverse || { on: false, flips: 0, at: 0 };
-        R2.on = true; R2.at = Date.now();
-      } catch (e3) {}
-      var wasSolo = state.reverseMode === 'solo64x';   // v1.54.1: solo holds the aim lock through the fanout
-      var until = state.windowUntil;
-      setTimeout(function () {
-        if (state.windowUntil !== until) return;
-        state.windowUntil = 0;
-        if (wasSolo) { state.lock = null; state.lockName = ''; }   // solo's lock is released when the rollout lands, not at lockMaxAgeMs
-        try { var R3 = window.__murtherReverse; if (R3) R3.on = !!state.manualOn; } catch (e4) {}
-      }, windowMs + 20);
+      if (!opts || !opts.noWindow) {
+        try {
+          var R2 = window.__murtherReverse = window.__murtherReverse || { on: false, flips: 0, at: 0 };
+          R2.on = true; R2.at = Date.now();
+        } catch (e3) {}
+        var wasSolo = state.reverseMode === 'solo64x';   // v1.54.1: solo holds the aim lock through the fanout
+        var until = state.windowUntil;
+        setTimeout(function () {
+          if (state.windowUntil !== until) return;
+          state.windowUntil = 0;
+          if (wasSolo) { state.lock = null; state.lockName = ''; }   // solo's lock is released when the rollout lands, not at lockMaxAgeMs
+          try { var R3 = window.__murtherReverse; if (R3) R3.on = !!state.manualOn; } catch (e4) {}
+        }, windowMs + 20);
+      }
     }
     /* v1.54.1: branch on the frame's own shape. The 9-byte 0x10 tick gets aimTick and the
      * reverse decision; the 1-byte 0x11 split gets its classification. aimTick never runs on
@@ -3324,6 +3336,9 @@ else if (typeof define === 'function' && define['amd'])
     var BURST_OWNERS_INFRA = 3;
     var POOLED_NUMERIC = /^[0-9][0-9.,]*[kKmM%]?$/;
     var lastBurstTs = 0, fillsRecent = 0, armedOwner = -1;
+    /* v1.74.21 PATCH 3 (C7): simUntil satisfies the count-source gate during a
+     * simulate proof so the deny block stays silent for the evidence run. */
+    var simUntil = 0;
     var nameByHash = {};
     /* Fix round 1b: the global Diagnostics logging row was removed in v1.63.1
      * and load() hard-wires diagLog off, so mxDiag alone can never show brain
@@ -3584,7 +3599,9 @@ else if (typeof define === 'function' && define['amd'])
         if (!armed && S.otorev.autoTriggerEnabled && ownN === 0 && foeN === 0 && (now - lastEndAt) > REARM_COOLDOWN_MS) {
           var liveG = false;
           try { liveG = (typeof inLiveSession === 'function') ? !!inLiveSession() : false; } catch (eLG) {}
-          if (liveG && lastDeny !== 'reader-blind') {
+          /* PATCH 3: a running simulate proof holds the gate open — the burst
+           * it injected IS the count source. Keeps the evidence array clean. */
+          if (liveG && simUntil <= now && lastDeny !== 'reader-blind') {
             lastDeny = 'reader-blind';
             betix('INFO', 'auto-trigger denied: no count source (scene blind, wire ownership undecoded yet)', {});
           }
@@ -3685,8 +3702,8 @@ else if (typeof define === 'function' && define['amd'])
            * dispatcher falls through to the stock fanout + reverse, so manual
            * play works everywhere and only the automatic watch refuses. */
           lastDeny = 'reader-blind';
-          try { toast('Auto Reverse: no count source yet (blind scene) — firing stock split, auto-watch parked'); } catch (eT3) {}
-          loud('bind press denied (reader-blind: blind scene, wire ownership undecoded) — stock fired', { mode: mode });
+          try { toast('Auto Reverse: blind scene — split only, no reverse window, auto-watch parked'); } catch (eT3) {}
+          loud('bind press denied (reader-blind: blind scene, wire ownership undecoded) — fanout-only stock', { mode: mode });
           return false;
         }
         if (!snap.lockName) {
@@ -3721,8 +3738,23 @@ else if (typeof define === 'function' && define['amd'])
         for (i = 0; i < n * 2; i++) {
           try { mmNames.entries.push({ text: name, ts: now }); } catch (eP) { return { ok: false, why: 'inject failed' }; }
         }
+        /* PATCH 3: arm directly on the synthetic owner (real FNV hash, so the
+         * burst evaluator matches it like any enemy) and hold the count-source
+         * gate open for the proof window. Simulates on a blind build with no
+         * live enemy: arm → CONFIRMED → return → disarm, end to end. */
+        simUntil = now + 2500;
+        var key = 2, ho = 2;
+        try { key = THRESH_ARKEY[(typeof S !== 'undefined' && S.otorev && S.otorev.autoTriggerThreshold) || '4x'] || 2; } catch (eK) {}
+        try { ho = hashName(name) || 2; } catch (eH) {}
+        try {
+          if (F.arm(ho, key) === 1) {
+            armedAt = now; lastArmedKey = key; armedOwner = ho; armedName = name.substring(0, 24); lastDeny = ''; epLogged = false;
+          } else {
+            return { ok: false, why: 'arm failed' };
+          }
+        } catch (eA) { return { ok: false, why: 'arm failed' }; }
         var stillArmed = false;
-        try { stillArmed = !!(F.is_armed && F.is_armed() === 1); } catch (eA) {}
+        try { stillArmed = !!(F.is_armed && F.is_armed() === 1); } catch (eA2) {}
         return { ok: true, pieces: n, entries: n * 2, armed: stillArmed };
       } catch (e) { return { ok: false, why: 'exception' }; }
     }
@@ -13605,8 +13637,23 @@ function applyChatResize() {
        * the stock fanout while dead would only arm a phantom reverse window
        * on no cell. Stay silent; the toast is the response. */
       try { if (brain && brain.status && brain.status().deny === 'spectating') return; } catch (eD) {}
+      /* v1.74.21 PATCH 2 (C7): blind-scene presses become fanout-only. The old
+       * fall-through opened the full reverse window + aim rewrite on every
+       * blind press; with the cursor near your own cell the negated vector is
+       * near zero and the cell stands still for seconds. stockSplitOnly keeps
+       * the split and drops the window + aim rewrite. */
+      try { if (brain && brain.status && brain.status().deny === 'reader-blind') { stockSplitOnly(mode); return; } } catch (eD2) {}
     } catch (eB) {}
     autoReverseFire(mode);
+  }
+  function stockSplitOnly(mode) {
+    var m = window.__murtherAutoReverse;
+    if (!m || !m.fireTrigger) { autoReverseFire(mode); return; }
+    var prev = m.state.reverseMode;
+    m.state.reverseMode = mode;
+    try { m.fireTrigger('bind(blind): ' + mode, { aim: false, noWindow: true }); }
+    catch (eF) { toast('Auto Reverse bind failed', 'bad'); }
+    m.state.reverseMode = prev;
   }
   function autoReverseFire(mode) {
     try {
