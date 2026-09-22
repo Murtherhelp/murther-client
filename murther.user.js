@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Murther — gota.io client
 // @namespace    murther.gota
-// @version      1.75.2
+// @version      1.75.3
 // @description  Murther - a full UI/UX replacement client for play.gota.io: a dark purple theme and a HUD reskin that HOSTS the live native panels (stats ID/Mass/Score/Cells top-centre, FPS/ping/server above the chat, leaderboard top-right, minimap, party, chat) so everything stays synced with the game; a native-synced server list with a verified pick -> join handshake; a clean name/mass leaderboard with an animated border that highlights your own row; searchable settings, themes and a full backup; client hotkeys with live write-through rebinding, chat macros and game-side action keys; and real performance controls (FPS cap / vsync governor, renderer resolution, reduce effects). A self-healing HUD keeps it honest: a state that would leave every panel hidden is reset once, with a toast, instead of blanking the screen. Feature rows explain themselves behind their own arrow (click it) instead of on hover - a category header is the only hover description left; the number on a category header is the real count of rows it is showing; Themes opens with Enable Custom Theme, which switches the client's whole custom look off and says so; Play and Spectate wear an animated white outline; and the profile card's particle field is fitted to the real device pixels, reacts to the pointer and demotes itself when frames get slow.
 // @description  Every release note and the full behavioural history live in the RELEASE HISTORY block below the header - the metadata above carries only the current feature set, so it can never go stale or outgrow a userscript manager's UI.
 // @author       Murther
@@ -827,6 +827,11 @@
 // Genuine refreshes (regions agree, list empty) still keep the old rows, and
 // __murther.serverCheck() now reports pill vs native region, per-tab keys and
 // fresh-vs-cached container identity, so one paste answers 'why' next time.
+// v1.75.3: the é masquerade is dead. Auto Reverse binds with the master off no
+// longer toggle the plain input-tick reverse (that fallback made Digit2/é read
+// as an on/off switch) — they toast where to enable instead. New bindable
+// action "Toggle Auto Reverse master" (Hotkeys › Auto Reverse, unbound by
+// default) flips the master from anywhere and repaints the tab switch.
 // v1.75.2: C9 — third freeze family (latched window / foreign mode the blind
 // bind path could never clear). Every bind press now repairs foreign modes
 // and force-closes over-budget windows (true age logged); pump does R-toggle
@@ -4477,6 +4482,7 @@ else if (typeof define === 'function' && define['amd'])
       otorev1x: 'Digit1', otorev4x: 'Digit2', otorev8x: 'Digit3',
       otorev16x: 'Digit4', otorev64x: 'Digit5',
       otorevSolo64x: 'Backquote', 
+      otorevMaster: '',   // v1.75.3: master enable toggle; default unbound so it can never collide
     },
     // v1.38.0: the named look library behind the Appearance tab (name + skin link,
     // exported with the Backup). The cached images themselves live in their own
@@ -12518,6 +12524,7 @@ function applyChatResize() {
       setAutoReverse();
       toast(S.otorev.enabled ? 'Auto Reverse on' : 'Auto Reverse off');
     });
+    UI.paintAutoReverseMaster = paintMaster;   // v1.75.3
 
     var arBody = section('Auto Reverse', 'binds');
     pick(arBody, 'Reverse mode',
@@ -13803,13 +13810,28 @@ function applyChatResize() {
     catch (eF) { toast('Auto Reverse bind failed', 'bad'); }
     m.state.reverseMode = prev;
   }
+  // v1.75.3: the Auto Reverse master as a first-class client action. One place toggles
+  // it from anywhere, repaints the tab-header switch, and keeps store/module/toast in
+  // step (setAutoReverse disarms the brain when going off). Sits in Hotkeys › Auto
+  // Reverse next to the mode binds; rides the Hotkeys backup group like every bind.
+  function toggleAutoReverseMaster() {
+    S.otorev.enabled = !S.otorev.enabled;
+    save();
+    setAutoReverse();
+    try { if (UI.paintAutoReverseMaster) UI.paintAutoReverseMaster(); } catch (eP) {}
+    toast(S.otorev.enabled
+      ? 'Auto Reverse on'
+      : 'Auto Reverse off — binds now only toast; plain reverse keeps its own bind (Hotkeys › Client features)');
+  }
   function autoReverseFire(mode) {
     try {
-      if (!S.otorev || !S.otorev.enabled) {
-        var R = window.__murtherReverse;
-        if (R) { R.on = !R.on; R.at = Date.now(); toast('Auto-reverse ' + (R.on ? 'ON' : 'OFF')); }
-        return;
-      }
+    if (!S.otorev || !S.otorev.enabled) {
+      // v1.75.3: an Auto Reverse bind with the master off must NOT toggle the plain
+      // input-tick reverse any more — that fallback is what made é (Digit2 = 4x on
+      // AZERTY) read as an auto-reverse on/off switch. Say where to enable it instead.
+      toast('Auto Reverse is off — enable it in the Auto Reverse tab, or bind "Toggle Auto Reverse master" (Hotkeys › Auto Reverse)');
+      return;
+    }
       var m = window.__murtherAutoReverse;
       if (!m || !m.fireTrigger) { toast('Auto Reverse module not loaded', 'bad'); return; }
       var prev = m.state.reverseMode;
@@ -13890,6 +13912,7 @@ function applyChatResize() {
   KEY_LABELS.otorev16x = 'Auto Reverse (16x)';
   KEY_LABELS.otorev64x = 'Auto Reverse (64x)';
   KEY_LABELS.otorevSolo64x = 'Solotrick Auto Reverse (64x)';
+  KEY_LABELS.otorevMaster = 'Toggle Auto Reverse master';   // v1.75.3
   // v1.44.0: CLIENT_ACTIONS is the one place their labels live, and the one place the
   // Hotkeys tab reads its last section from - so a game-side action can no longer be
   // added without being listed, bindable and dispatched.
@@ -13900,7 +13923,7 @@ function applyChatResize() {
     ['Indicators & zoom', ['cursorLine', 'lsArrows', 'splitIndicator', 'autoZoom']],
     ['Game display & match', CLIENT_ACTIONS.map(function (a) { return a.action; })],
     ['Servers & helpers', ['cycleRegion', 'fpsCap']],
-    ['Auto Reverse', ['otorev1x','otorev4x','otorev8x','otorev16x','otorev64x','otorevSolo64x']]
+    ['Auto Reverse', ['otorevMaster','otorev1x','otorev4x','otorev8x','otorev16x','otorev64x','otorevSolo64x']]
   ];
   // Default gameplay keys seen on play.gota.io (per the game's own hotkeys panel).
   // Informational only — the live native panel is scanned too when present.
@@ -14329,12 +14352,13 @@ function applyChatResize() {
       fpsCap: 'Cycles the FPS cap (off / 30 / 60 / 90 / 120 / 144 / 165 / 240 / Uncap FPS)',
       dotCrosshair: 'Toggles the Dot Position crosshair (mxis-style dot cursor with ring + X/Y readouts)',
       reverse: 'Reverses the outgoing input tick — your cell drives opposite to the cursor (the send hook this client installs does the rewriting)',
-      otorev1x: 'Arms the reverse window and fires a single split. The base behaviour; falls back to the plain reverse when Auto Reverse is off.',
+      otorev1x: 'Arms the reverse window and fires a single split. The base behaviour; with the master off it only toasts (v1.75.3).',
       otorev4x: 'Arms the reverse window and fans the split out to a 4-way (Double Split).',
       otorev8x: 'Arms the reverse window and fans the split out to an 8-way (Triple Split).',
       otorev16x: 'Arms the reverse window and fans the split out to a 16-way (Quad Split).',
       otorev64x: 'Arms the reverse window and fans the split out to a 64-way (Sextuple Split).',
-      otorevSolo64x: 'The 64-way fanout with the Solotrick hold: the reverse window and the aim lock are kept through the whole rollout.'
+      otorevSolo64x: 'The 64-way fanout with the Solotrick hold: the reverse window and the aim lock are kept through the whole rollout.',
+      otorevMaster: 'Toggles the Auto Reverse master switch (same switch as the Auto Reverse tab header). With the master off, Auto Reverse binds only toast — they no longer toggle the plain input-tick reverse.'
     };
     // v1.44.0: the game-side actions describe themselves in CLIENT_ACTIONS - one source,
     // so a tooltip can never drift from what the action really does.
@@ -20234,6 +20258,7 @@ function applyChatResize() {
       // v1.54.0: the Auto Reverse bind set. Each fires the trigger state machine directly,
       // so a bind works whether the trigger mode is fast, predictive or confirmed -
       // the mode decides what the AUTOMATIC trigger does, not what a bind press does.
+      if (keyMatches(e, S.keys.otorevMaster) && !e.repeat) { toggleAutoReverseMaster(); return; }   // v1.75.3
       if (keyMatches(e, S.keys.otorev1x) && !e.repeat) { autoReverseBindPress('1x'); return; }
       if (keyMatches(e, S.keys.otorev4x) && !e.repeat) { autoReverseBindPress('4x'); return; }
       if (keyMatches(e, S.keys.otorev8x) && !e.repeat) { autoReverseBindPress('8x'); return; }
