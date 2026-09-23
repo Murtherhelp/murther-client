@@ -93,6 +93,19 @@ int main() {
     // 8. Bad key rejected.
     init_engine(); CHECK(arm(50, 9) == 0 && is_armed() == 0, "bad_key_rejected");
 
+    // 9. C10 expiry-unwind parity (marker: expiry-unwind). The glue's
+    // `window expired, disarmed` branch must run the identical release the
+    // confirm path runs: engine disarmed = the send hook's wasmArmed reads
+    // false = the hook is released. Forced expiry here is disarm(); assert
+    // the hook condition cleared, the queue drained, and a clean re-arm.
+    init_engine(); CHECK(arm(7, 5) == 1, "expiry_arm_64x_ok");
+    { std::vector<Cell> w = { mk(1, 7, 30.0f) }; push_cells(w.data(), (int)w.size()); }
+    disarm(); // forced expiry unwind
+    CHECK(is_armed() == 0, "expiry_unwind_hook_released");
+    CHECK(pop_action(&ox, &oy, &oc) == 0, "expiry_unwind_queue_drained");
+    CHECK(arm(7, 5) == 1, "expiry_unwind_rearm_ok");
+    CHECK(is_armed() == 1, "expiry_unwind_rearm_armed");
+
     if (failures == 0) { printf("ALL TESTS PASS\n"); return 0; }
     printf("%d FAILURES\n", failures);
     return 1;

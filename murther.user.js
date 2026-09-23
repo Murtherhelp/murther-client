@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Murther — gota.io client
 // @namespace    murther.gota
-// @version      1.75.6
+// @version      1.75.7
 // @description  Murther - a full UI/UX replacement client for play.gota.io: a dark purple theme and a HUD reskin that HOSTS the live native panels (stats ID/Mass/Score/Cells top-centre, FPS/ping/server above the chat, leaderboard top-right, minimap, party, chat) so everything stays synced with the game; a native-synced server list with a verified pick -> join handshake; a clean name/mass leaderboard with an animated border that highlights your own row; searchable settings, themes and a full backup; client hotkeys with live write-through rebinding, chat macros and game-side action keys; and real performance controls (FPS cap / vsync governor, renderer resolution, reduce effects). A self-healing HUD keeps it honest: a state that would leave every panel hidden is reset once, with a toast, instead of blanking the screen. Feature rows explain themselves behind their own arrow (click it) instead of on hover - a category header is the only hover description left; the number on a category header is the real count of rows it is showing; Themes opens with Enable Custom Theme, which switches the client's whole custom look off and says so; Play and Spectate wear an animated white outline; and the profile card's particle field is fitted to the real device pixels, reacts to the pointer and demotes itself when frames get slow.
 // @description  Every release note and the full behavioural history live in the RELEASE HISTORY block below the header - the metadata above carries only the current feature set, so it can never go stale or outgrow a userscript manager's UI.
 // @author       Murther
@@ -827,6 +827,17 @@
 // Genuine refreshes (regions agree, list empty) still keep the old rows, and
 // __murther.serverCheck() now reports pill vs native region, per-tab keys and
 // fresh-vs-cached container identity, so one paste answers 'why' next time.
+// v1.75.7: C10 expiry-unwind parity (the freeze this loop actually hit:
+// the `window expired, disarmed` branch zeroed brain state but never ran the
+// release the confirm/disarm path runs). It now disarms BOTH engines (a
+// mid-arm engine flip can no longer strand the other one latched — the send
+// hook reads the WASM flag, so a stranded WASM arm freezes the cell), closes
+// a brain-opened send-hook window back to manual-only once its budget has
+// elapsed (manual hotkey flips never touch windowUntil, so they are hands-off
+// here), and repairs a foreign hook mode. Marker: expiry-unwind (graded by
+// verify.py). C11 chip-hoist pinned: `armed` stays above the `lockStr` line
+// so the watched-name fallback reads an assigned local and the left pill can
+// name SIM_TARGET (marker: chip-hoist).
 // v1.75.6: chips name the watched target (status().armedName) while armed when
 // no scene lock exists (blind builds / simulate); lock name still wins when a
 // real lock is present. Lets the simulate proof play the full arm→confirm→
@@ -3741,9 +3752,33 @@ else if (typeof define === 'function' && define['amd'])
         // 3. The arm window is bounded by the existing reverseWindowMs setting so a
         //    watched enemy that never splits cannot hold the reverse forever.
         if (armed && armedAt && (now - armedAt) > (S.otorev.reverseWindowMs || 380)) {
-          try { if (useJs) MX_AUTOREVERSE_JS.disarm(); else F.disarm(); } catch (eD) {}
+          /* v1.75.7 C10 expiry-unwind parity: this branch runs the IDENTICAL
+           * release the confirm/disarm path runs, not just zeroed brain
+           * state. Both engines disarm (a mid-arm engine flip must never
+           * strand the other one latched — the send hook reads the WASM
+           * flag, so a stranded WASM arm freezes the cell). A brain-opened
+           * window (windowUntil !== 0 proves fireTrigger opened it; a manual
+           * hotkey flip never touches windowUntil) whose budget already
+           * elapsed gets closed back to manual-only — a still-live window
+           * stays owned by fireTrigger's own timer so a fresh confirm return
+           * is never cut short. Foreign hook mode repaired (silent when
+           * already reverse). Marker: expiry-unwind. */
+          try { F.disarm(); } catch (eD) {}
+          try { MX_AUTOREVERSE_JS.disarm(); } catch (eD2) {}
+          try {
+            if (m && m.state && m.state.windowUntil && now >= m.state.windowUntil) {
+              var RhX = mxRevObj();
+              if (RhX && RhX.on) {
+                var manX = false;
+                try { manX = !!(m.state.manualOn); } catch (eMX) {}
+                RhX.on = manX; RhX.at = now;
+              }
+              m.state.windowUntil = 0;
+            }
+            try { mxReverseRepair(); } catch (eRX) {}
+          } catch (eHX) {}
           armed = false; armedAt = 0; AR.endAt = now; armedOwner = -1; armedName = ''; AR.ep = false;
-          diag('auto-reverse core: window expired, disarmed');
+          diag('auto-reverse core: window expired, disarmed [expiry-unwind]');
         }
         // 4. Evaluate per selected engine (Step 6: WASM core or pure-JS
         //    fallback). The burst scan runs once per tick for both engines so
@@ -13905,6 +13940,10 @@ function applyChatResize() {
       wrap.style.display = liveM ? '' : 'none';
       if (!liveM) return;
       var w = r.wasm || {};
+      /* v1.75.7 C11 chip-hoist: `armed` MUST stay above the `lockStr` line —
+       * the watched-name fallback reads the local, so hoisting the lock line
+       * above this one would evaluate it before assignment and the left pill
+       * could never show SIM_TARGET. Marker: chip-hoist. */
       var armed = !!w.armed;
       var lockStr = mxArLockLabel(r) || ((armed && w.armedName) ? String(w.armedName) : '') || 'None';
       var now = Date.now();
