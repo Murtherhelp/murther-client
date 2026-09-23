@@ -8,8 +8,8 @@ Protocol instead and graded PASS/WARN/FAIL. The game tab must live in a browser
 launched with --remote-debugging-port=9222 (same requirement as fisen.py's CDP
 observer). fisen.py does NOT need to be running.
 
-Output: verdicts on screen + `verify_report_<UTC-timestamp>.json` next to this
-file. Send that file instead of console screenshots.
+Output: verdicts on screen + `logs/verify_report_<UTC-timestamp>.json` next to
+the fisen.py session files. Send that file instead of console screenshots.
 
 Still manual (needs a human in the match): pressing binds, splits, spawning,
 anything you watch with your eyes. This script automates every *read* probe.
@@ -25,6 +25,13 @@ CDP_PORT = 9222
 BRIDGE_PORT = 8765
 HERE = pathlib.Path(__file__).resolve().parent
 
+# NOTE on DevTools: this probe does NOT require DevTools open. CDP
+# Runtime.evaluate runs in the page main world — byte-for-byte the same
+# context as the DevTools console with "top" selected — whether DevTools is
+# open, closed, docked or not. fisen.py's CDP observer proves the channel with
+# DevTools closed every session. If you hand-compare in the console, keep its
+# context selector on "top"; any other selection runs your keystrokes elsewhere
+# and that mismatch is yours, not the probe's.
 BATCH_JS = """(function () {
   var out = { murther: false, markers: {}, wasm: null, freeze: null,
               autoreverseKeys: [], error: null };
@@ -186,7 +193,12 @@ async def main_async():
     for level, name, msg in verdicts:
         print("[VERIFY] %-4s %-8s %s" % (level, name, msg))
     ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
-    out_path = HERE / f"verify_report_{ts}.json"
+    log_dir = HERE / "logs"
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+    out_path = log_dir / f"verify_report_{ts}.json"
     out_path.write_text(json.dumps({
         "ts": ts, "overall": overall,
         "verdicts": [{"level": a, "check": b, "msg": c} for a, b, c in verdicts],
