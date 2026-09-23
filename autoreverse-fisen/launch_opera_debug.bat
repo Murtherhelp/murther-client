@@ -7,16 +7,24 @@ rem new window joins an already-running Opera process, leaving :9222 dead and
 rem verify.py grading nothing. So: kill first, CONFIRM the kill, then launch
 rem with the flag in the normal profile (keeps Tampermonkey + the Murther
 rem entry), then wait until the port actually answers.
-taskkill /IM opera.exe /F >nul 2>&1
-timeout /t 2 /nobreak >nul
-rem If Opera survived (tray icon / background apps), the flag would be swallowed.
-tasklist /FI "IMAGENAME eq opera.exe" 2>nul | find /I "opera.exe" >nul
-if not errorlevel 1 (
-    echo Opera is STILL running - close it fully (check the tray icon too),
-    echo then run this bat again. The debug flag cannot attach otherwise.
-    pause
-    exit /b 1
+taskkill /IM opera.exe /F /T >nul 2>&1
+rem Opera shuts down slowly; wait up to 12s for the last process to exit
+rem before declaring it wedged. (/T takes the whole tree: Flow, sidebar,
+rem crash-handler children that otherwise outlive the parent.)
+for /L %%i in (1,1,12) do (
+    tasklist /FI "IMAGENAME eq opera.exe" 2>nul | find /I "opera.exe" >nul
+    if errorlevel 1 goto :operadead
+    timeout /t 1 /nobreak >nul
 )
+echo Opera is STILL running after kill + 12s. Likely causes:
+echo   - tray icon alive: right-click the Opera icon by the clock, Exit.
+echo   - Settings ^> System ^> "Continue running background apps" is ON.
+echo   - another Windows session / elevated Opera owns it: run this bat from
+echo     an Administrator prompt, or log that session off.
+tasklist /FI "IMAGENAME eq opera.exe" /FO TABLE
+pause
+exit /b 1
+:operadead
 set "OPERA="
 if exist "%LocalAppData%\Programs\Opera\opera.exe" set "OPERA=%LocalAppData%\Programs\Opera\opera.exe"
 if exist "%LocalAppData%\Programs\Opera GX\opera.exe" set "OPERA=%LocalAppData%\Programs\Opera GX\opera.exe"
