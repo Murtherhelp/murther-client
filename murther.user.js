@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Murther — gota.io client
 // @namespace    murther.gota
-// @version      1.75.3
+// @version      1.75.4
 // @description  Murther - a full UI/UX replacement client for play.gota.io: a dark purple theme and a HUD reskin that HOSTS the live native panels (stats ID/Mass/Score/Cells top-centre, FPS/ping/server above the chat, leaderboard top-right, minimap, party, chat) so everything stays synced with the game; a native-synced server list with a verified pick -> join handshake; a clean name/mass leaderboard with an animated border that highlights your own row; searchable settings, themes and a full backup; client hotkeys with live write-through rebinding, chat macros and game-side action keys; and real performance controls (FPS cap / vsync governor, renderer resolution, reduce effects). A self-healing HUD keeps it honest: a state that would leave every panel hidden is reset once, with a toast, instead of blanking the screen. Feature rows explain themselves behind their own arrow (click it) instead of on hover - a category header is the only hover description left; the number on a category header is the real count of rows it is showing; Themes opens with Enable Custom Theme, which switches the client's whole custom look off and says so; Play and Spectate wear an animated white outline; and the profile card's particle field is fitted to the real device pixels, reacts to the pointer and demotes itself when frames get slow.
 // @description  Every release note and the full behavioural history live in the RELEASE HISTORY block below the header - the metadata above carries only the current feature set, so it can never go stale or outgrow a userscript manager's UI.
 // @author       Murther
@@ -827,6 +827,11 @@
 // Genuine refreshes (regions agree, list empty) still keep the old rows, and
 // __murther.serverCheck() now reports pill vs native region, per-tab keys and
 // fresh-vs-cached container identity, so one paste answers 'why' next time.
+// v1.75.4: F8 — Fisen-style Auto Reverse status chips (lock name verbatim + Off/idle/
+// <N>x armed/returned, confirm flash, reset on disarm), a `lock-acquired` Betix record
+// carrying the raw label + owner hash at arm time, and report().enabled for the chips.
+// Chips are self-contained: own CSS tokens, fixed top-center overlay, textContent-only,
+// so exotic names (CJK, emoji, fullwidth, symbols) render safely and verbatim.
 // v1.75.3: the é masquerade is dead. Auto Reverse binds with the master off no
 // longer toggle the plain input-tick reverse (that fallback made Digit2/é read
 // as an on/off switch) — they toast where to enable instead. New bindable
@@ -2886,6 +2891,7 @@
                      at: R.at || 0, ageMs: R.at ? (Date.now() - R.at) : -1 };
           } catch (e) { return { hook: false }; }
         })(),
+        enabled: !!(S.otorev && S.otorev.enabled),   // v1.75.4 (F8): master state for the chips ('Off' branch)
         aimMode: state.autoAim, ticks: state.ticks, splits: state.splits,
         ignoredSplits: state.ignoredSplits, triggers: state.triggers,
         lastTriggerAt: state.lastTriggerAt, lastTriggerWhy: state.lastTriggerWhy,
@@ -3850,6 +3856,9 @@ else if (typeof define === 'function' && define['amd'])
         } catch (eAB) { okB = false; }
         if (okB) {
           armedAt = Date.now(); lastArmedKey = key; armedOwner = uh; armedName = snap.lockName || ''; AR.deny = '';
+          /* v1.75.4 (F8): lock-acquired record — raw label + owner hash at arm
+           * time, so "was the name captured?" is answerable from logs alone. */
+          try { MX_BETIX.log('INFO', 'lock-acquired', { raw: String(armedName || ''), owner: armedOwner, mode: mode }); } catch (eBL) {}
           loud('armed (bind ' + mode + ') on "' + snap.lockName + '" — watching for x' + key, { lock: snap.lockName, mode: mode, arKey: key });
           return true;
         }
@@ -12525,6 +12534,13 @@ function applyChatResize() {
       toast(S.otorev.enabled ? 'Auto Reverse on' : 'Auto Reverse off');
     });
     UI.paintAutoReverseMaster = paintMaster;   // v1.75.3
+    /* v1.75.4 (F8): mount the status chips once the menu shell exists. Guarded
+     * so a missing body can never break boot; the 200 ms poller self-skips
+     * until report() answers. */
+    try {
+      if (document.body) mxArStatusChips();
+      else document.addEventListener('DOMContentLoaded', function () { mxArStatusChips(); });
+    } catch (eC) {}
 
     var arBody = section('Auto Reverse', 'binds');
     pick(arBody, 'Reverse mode',
@@ -13822,6 +13838,77 @@ function applyChatResize() {
     toast(S.otorev.enabled
       ? 'Auto Reverse on'
       : 'Auto Reverse off — binds now only toast; plain reverse keeps its own bind (Hotkeys › Client features)');
+  }
+  /* v1.75.4 (F8): Fisen-style Auto Reverse status chips — lock name verbatim + armed state.
+   * Placement hardening vs the reference sketch (top:8px -> top:44px, plus
+   * pointer-events:none): the client's own stats strip is pinned top-center at
+   * top:0, so 8px would sit directly on it; 44px clears it while keeping the
+   * top-center Fisen-style dock. pointer-events:none (same convention as
+   * #murther-root) guarantees zero click/interaction footprint. All tokens are
+   * mx-arstatus-* prefixed; rendering is textContent-only. */
+  var MX_AR_CHIPS_CSS =
+    '.mx-arstatus{position:fixed;top:44px;left:50%;transform:translateX(-50%);display:flex;gap:6px;pointer-events:none;' +
+    'z-index:2147483000;font:600 12px/1.4 system-ui,"Segoe UI",Roboto,sans-serif}' +
+    '.mx-arstatus-chip{display:flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;' +
+    'background:rgba(10,12,16,.82);color:#e8ecf2;border:1px solid rgba(255,255,255,.14);' +
+    'backdrop-filter:blur(4px);max-width:340px;overflow:hidden;white-space:nowrap}' +
+    '.mx-arstatus-ico{color:#4da3ff;flex:0 0 auto}' +
+    '.mx-arstatus-state .mx-arstatus-ico{color:#9aa4b2}' +
+    '.mx-arstatus-state.is-armed{border-color:rgba(64,224,150,.55)}' +
+    '.mx-arstatus-state.is-armed .mx-arstatus-ico,.mx-arstatus-state.is-armed .mx-arstatus-txt{color:#40e096}' +
+    '.mx-arstatus-state.is-off .mx-arstatus-txt{color:#9aa4b2}' +
+    '.mx-arstatus-state.is-flash .mx-arstatus-txt{color:#ffd166}';
+  function mxArLockLabel(r) {
+    var w = (r && r.wasm) || {};
+    var cand = [w.lock && w.lock.name, (typeof w.lock === 'string' ? w.lock : null),
+                w.lockName, w.ownerName, r.lockName];
+    for (var i = 0; i < cand.length; i++) {
+      if (typeof cand[i] === 'string' && cand[i]) return cand[i];
+    }
+    return '';
+  }
+  function mxArStatusChips() {
+    var st = document.createElement('style');
+    st.textContent = MX_AR_CHIPS_CSS;
+    (document.head || document.documentElement).appendChild(st);
+    function chip(cls, ico) {
+      var c = document.createElement('div');
+      c.className = 'mx-arstatus-chip ' + cls;
+      var i = document.createElement('span'); i.className = 'mx-arstatus-ico'; i.textContent = ico;
+      var t = document.createElement('span'); t.className = 'mx-arstatus-txt'; t.textContent = '—';
+      c.appendChild(i); c.appendChild(t); return c;
+    }
+    var wrap = document.createElement('div'); wrap.className = 'mx-arstatus';
+    var lockChip = chip('mx-arstatus-lock', '⌖');
+    var stChip = chip('mx-arstatus-state is-off', '↻');
+    wrap.appendChild(lockChip); wrap.appendChild(stChip);
+    (document.body || document.documentElement).appendChild(wrap);
+    var lockTxt = lockChip.lastChild, stTxt = stChip.lastChild;
+    var last = '', prevArmed = false, prevLock = 'None', flashUntil = 0;
+    setInterval(function () {
+      var r = null;
+      try { r = window.__murtherAutoReverse && window.__murtherAutoReverse.report(); } catch (e) { return; }
+      if (!r) return;
+      var w = r.wasm || {};
+      var armed = !!w.armed;
+      var lockStr = mxArLockLabel(r) || 'None';
+      var now = Date.now();
+      if (prevArmed && !armed && prevLock !== 'None') flashUntil = now + 1200; // confirm flash
+      prevArmed = armed; prevLock = lockStr;
+      var stStr;
+      if (now < flashUntil) stStr = 'returned';
+      else if (r.enabled === false) stStr = 'Off';
+      else if (armed) stStr = (w.threshold || '?') + ' armed';
+      else stStr = w.deny ? ('idle (' + w.deny + ')') : 'idle';
+      var key = lockStr + '|' + stStr;
+      if (key === last) return;
+      last = key;
+      lockTxt.textContent = lockStr;   // textContent only: CJK/emoji/fullwidth render verbatim, never parsed
+      stTxt.textContent = stStr;
+      stChip.classList.toggle('is-armed', armed && now >= flashUntil);
+      stChip.classList.toggle('is-off', stStr === 'Off');
+      stChip.classList.toggle('is-flash', now < flashUntil);
+    }, 200);
   }
   function autoReverseFire(mode) {
     try {
