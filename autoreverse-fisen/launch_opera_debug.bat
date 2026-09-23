@@ -1,8 +1,22 @@
 @echo off
 rem Fisen auxiliary launcher - prepares Opera with the CDP debug port.
 rem NOT part of the fisen.py launch contract; fisen.py still runs as: python fisen.py
+rem
+rem Why the dance below: --remote-debugging-port is silently IGNORED when the
+rem new window joins an already-running Opera process, leaving :9222 dead and
+rem verify.py grading nothing. So: kill first, CONFIRM the kill, then launch
+rem with the flag in the normal profile (keeps Tampermonkey + the Murther
+rem entry), then wait until the port actually answers.
 taskkill /IM opera.exe /F >nul 2>&1
 timeout /t 2 /nobreak >nul
+rem If Opera survived (tray icon / background apps), the flag would be swallowed.
+tasklist /FI "IMAGENAME eq opera.exe" 2>nul | find /I "opera.exe" >nul
+if not errorlevel 1 (
+    echo Opera is STILL running - close it fully (check the tray icon too),
+    echo then run this bat again. The debug flag cannot attach otherwise.
+    pause
+    exit /b 1
+)
 set "OPERA="
 if exist "%LocalAppData%\Programs\Opera\opera.exe" set "OPERA=%LocalAppData%\Programs\Opera\opera.exe"
 if exist "%LocalAppData%\Programs\Opera GX\opera.exe" set "OPERA=%LocalAppData%\Programs\Opera GX\opera.exe"
@@ -12,6 +26,25 @@ if not defined OPERA (
     pause
     exit /b 1
 )
-start "" "%OPERA%" --remote-debugging-port=9222
-echo Opera launched with CDP on port 9222. Now run: python fisen.py
+start "" "%OPERA%" --remote-debugging-port=9222 about:blank
+where curl >nul 2>&1
+if errorlevel 1 (
+    echo Launched, but curl is missing so this script cannot check the port.
+    echo Open https://play.gota.io/ in THAT Opera window, then run: python verify.py
+    pause
+    exit /b 0
+)
+echo Waiting for CDP on :9222 ...
+for /L %%i in (1,1,25) do (
+    curl -s -m 2 http://127.0.0.1:9222/json/version >nul 2>&1
+    if not errorlevel 1 (
+        echo CDP is up on :9222.
+        echo Now open https://play.gota.io/ in THAT Opera window, then run: python verify.py
+        pause
+        exit /b 0
+    )
+    timeout /t 1 /nobreak >nul
+)
+echo CDP never came up on :9222. If Opera opened anyway, close it fully and retry.
 pause
+exit /b 1

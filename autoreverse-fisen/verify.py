@@ -119,6 +119,19 @@ async def fetch_targets_raw(port):
     return json.loads(body.decode("utf-8", "replace"))
 
 
+async def poll_targets(port, total=20):
+    """Poll /json/list until it answers. A single shot loses the race with
+    a browser that is still starting; the port also needs ~1s after launch."""
+    last = TimeoutError("no answer on :%d" % port)
+    for _ in range(total):
+        try:
+            return await asyncio.wait_for(fetch_targets_raw(port), timeout=3)
+        except Exception as e:
+            last = e
+            await asyncio.sleep(1)
+    raise last
+
+
 def bridge_reachable():
     try:
         s = socket.create_connection(("127.0.0.1", BRIDGE_PORT), timeout=3)
@@ -222,9 +235,21 @@ async def main_async():
     print("[VERIFY] bridge :8765 reachable:", bridge_reachable(),
           "(needed for file logs only, not for these probes)")
     try:
-        targets = await asyncio.wait_for(fetch_targets_raw(CDP_PORT), timeout=8)
+        targets = await poll_targets(CDP_PORT, total=20)
+    except asyncio.TimeoutError:
+        print("[VERIFY] FATAL: :%d holds a silent process (accepts, never answers)." % CDP_PORT)
+        print("[VERIFY] kill stray opera.exe, relaunch via launch_opera_debug.bat,")
+        print("[VERIFY] open play.gota.io in THAT window and rerun: python verify.py")
+        return 2
+    except ConnectionRefusedError as e:
+        print("[VERIFY] FATAL: nothing listening on :%d (%r)." % (CDP_PORT, e))
+        print("[VERIFY] the flag never attached — an old Opera swallowed it, or the game")
+        print("[VERIFY] tab lives in another window. Run launch_opera_debug.bat (it now")
+        print("[VERIFY] refuses to launch while Opera survives), open play.gota.io in THAT")
+        print("[VERIFY] window and rerun: python verify.py")
+        return 2
     except Exception as e:
-        print("[VERIFY] FATAL: no debuggable browser on :%d (%s)" % (CDP_PORT, str(e)[:100]))
+        print("[VERIFY] FATAL: no debuggable browser on :%d (%r)" % (CDP_PORT, e))
         print("[VERIFY] relaunch the browser with --remote-debugging-port=9222,")
         print("[VERIFY] then open play.gota.io in THAT browser and rerun: python verify.py")
         return 2
