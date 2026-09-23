@@ -827,7 +827,7 @@
 // Genuine refreshes (regions agree, list empty) still keep the old rows, and
 // __murther.serverCheck() now reports pill vs native region, per-tab keys and
 // fresh-vs-cached container identity, so one paste answers 'why' next time.
-// v1.75.4: F8 — Fisen-style Auto Reverse status chips (lock name verbatim + Off/idle/
+// v1.75.4: F8 — dual-chip Auto Reverse status readout (lock name verbatim + Off/idle/
 // <N>x armed/returned, confirm flash, reset on disarm), a `lock-acquired` Betix record
 // carrying the raw label + owner hash at arm time, and report().enabled for the chips.
 // Chips are self-contained: own CSS tokens, fixed top-center overlay, textContent-only,
@@ -13839,11 +13839,11 @@ function applyChatResize() {
       ? 'Auto Reverse on'
       : 'Auto Reverse off — binds now only toast; plain reverse keeps its own bind (Hotkeys › Client features)');
   }
-  /* v1.75.4 (F8): Fisen-style Auto Reverse status chips — lock name verbatim + armed state.
+  /* v1.75.4 (F8): dual-chip Auto Reverse status readout — lock name verbatim + armed state.
    * Placement hardening vs the reference sketch (top:8px -> top:44px, plus
    * pointer-events:none): the client's own stats strip is pinned top-center at
    * top:0, so 8px would sit directly on it; 44px clears it while keeping the
-   * top-center Fisen-style dock. pointer-events:none (same convention as
+   * top-center twin-chip dock. pointer-events:none (same convention as
    * #murther-root) guarantees zero click/interaction footprint. All tokens are
    * mx-arstatus-* prefixed; rendering is textContent-only. */
   var MX_AR_CHIPS_CSS =
