@@ -92,7 +92,7 @@ STATE_JS = """(function () {
 # file itself is graded on the CURRENT release markers. WARN when the newest
 # is absent — otherwise a stale tab grades PASS and poisons the loop.
 FRESH_MARKERS = ("armedName", "mxArStatusChips", "force-closed",
-                 "expiry-unwind", "chip-hoist")
+                 "expiry-unwind", "chip-hoist", "w.armed && w.armedName")
 
 
 async def fetch_targets_raw(port):
