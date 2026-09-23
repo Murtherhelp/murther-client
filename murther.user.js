@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Murther — gota.io client
 // @namespace    murther.gota
-// @version      1.75.4
+// @version      1.75.5
 // @description  Murther - a full UI/UX replacement client for play.gota.io: a dark purple theme and a HUD reskin that HOSTS the live native panels (stats ID/Mass/Score/Cells top-centre, FPS/ping/server above the chat, leaderboard top-right, minimap, party, chat) so everything stays synced with the game; a native-synced server list with a verified pick -> join handshake; a clean name/mass leaderboard with an animated border that highlights your own row; searchable settings, themes and a full backup; client hotkeys with live write-through rebinding, chat macros and game-side action keys; and real performance controls (FPS cap / vsync governor, renderer resolution, reduce effects). A self-healing HUD keeps it honest: a state that would leave every panel hidden is reset once, with a toast, instead of blanking the screen. Feature rows explain themselves behind their own arrow (click it) instead of on hover - a category header is the only hover description left; the number on a category header is the real count of rows it is showing; Themes opens with Enable Custom Theme, which switches the client's whole custom look off and says so; Play and Spectate wear an animated white outline; and the profile card's particle field is fitted to the real device pixels, reacts to the pointer and demotes itself when frames get slow.
 // @description  Every release note and the full behavioural history live in the RELEASE HISTORY block below the header - the metadata above carries only the current feature set, so it can never go stale or outgrow a userscript manager's UI.
 // @author       Murther
@@ -827,6 +827,9 @@
 // Genuine refreshes (regions agree, list empty) still keep the old rows, and
 // __murther.serverCheck() now reports pill vs native region, per-tab keys and
 // fresh-vs-cached container identity, so one paste answers 'why' next time.
+// v1.75.5: F8 chips hide while the game menu is up (menu-hide via the same
+// inLiveSession() the brain trusts; start hidden, poller reveals on play).
+// Chips remain a playing-only aid: no menu clutter, no extra logic.
 // v1.75.4: F8 — dual-chip Auto Reverse status readout (lock name verbatim + Off/idle/
 // <N>x armed/returned, confirm flash, reset on disarm), a `lock-acquired` Betix record
 // carrying the raw label + owner hash at arm time, and report().enabled for the chips.
@@ -13879,6 +13882,7 @@ function applyChatResize() {
       c.appendChild(i); c.appendChild(t); return c;
     }
     var wrap = document.createElement('div'); wrap.className = 'mx-arstatus';
+    wrap.style.display = 'none';   // v1.75.5: start hidden; the poller shows the wrap only while playing
     var lockChip = chip('mx-arstatus-lock', '⌖');
     var stChip = chip('mx-arstatus-state is-off', '↻');
     wrap.appendChild(lockChip); wrap.appendChild(stChip);
@@ -13889,6 +13893,13 @@ function applyChatResize() {
       var r = null;
       try { r = window.__murtherAutoReverse && window.__murtherAutoReverse.report(); } catch (e) { return; }
       if (!r) return;
+      /* v1.75.5: menu-hide. The chips are a playing aid — the whole wrap stays
+       * hidden while the game menu is up (same inLiveSession() the brain uses;
+       * default show if the check itself is unreachable). */
+      var liveM = true;
+      try { liveM = (typeof inLiveSession === 'function') ? !!inLiveSession() : true; } catch (eLM) {}
+      wrap.style.display = liveM ? '' : 'none';
+      if (!liveM) return;
       var w = r.wasm || {};
       var armed = !!w.armed;
       var lockStr = mxArLockLabel(r) || 'None';
