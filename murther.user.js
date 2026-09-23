@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Murther — gota.io client
 // @namespace    murther.gota
-// @version      1.75.5
+// @version      1.75.6
 // @description  Murther - a full UI/UX replacement client for play.gota.io: a dark purple theme and a HUD reskin that HOSTS the live native panels (stats ID/Mass/Score/Cells top-centre, FPS/ping/server above the chat, leaderboard top-right, minimap, party, chat) so everything stays synced with the game; a native-synced server list with a verified pick -> join handshake; a clean name/mass leaderboard with an animated border that highlights your own row; searchable settings, themes and a full backup; client hotkeys with live write-through rebinding, chat macros and game-side action keys; and real performance controls (FPS cap / vsync governor, renderer resolution, reduce effects). A self-healing HUD keeps it honest: a state that would leave every panel hidden is reset once, with a toast, instead of blanking the screen. Feature rows explain themselves behind their own arrow (click it) instead of on hover - a category header is the only hover description left; the number on a category header is the real count of rows it is showing; Themes opens with Enable Custom Theme, which switches the client's whole custom look off and says so; Play and Spectate wear an animated white outline; and the profile card's particle field is fitted to the real device pixels, reacts to the pointer and demotes itself when frames get slow.
 // @description  Every release note and the full behavioural history live in the RELEASE HISTORY block below the header - the metadata above carries only the current feature set, so it can never go stale or outgrow a userscript manager's UI.
 // @author       Murther
@@ -827,6 +827,10 @@
 // Genuine refreshes (regions agree, list empty) still keep the old rows, and
 // __murther.serverCheck() now reports pill vs native region, per-tab keys and
 // fresh-vs-cached container identity, so one paste answers 'why' next time.
+// v1.75.6: chips name the watched target (status().armedName) while armed when
+// no scene lock exists (blind builds / simulate); lock name still wins when a
+// real lock is present. Lets the simulate proof play the full arm→confirm→
+// return→reset lifecycle on the pills with no live enemy.
 // v1.75.5: F8 chips hide while the game menu is up (menu-hide via the same
 // inLiveSession() the brain trusts; start hidden, poller reveals on play).
 // Chips remain a playing-only aid: no menu clutter, no extra logic.
@@ -3486,7 +3490,7 @@ else if (typeof define === 'function' && define['amd'])
         else if (mh2 && mh2.forceJsFallback === true) eng = 'js';
         jsArmed = MX_AUTOREVERSE_JS.status().armed;
       } catch (eE) {}
-      return { ready: READY, armed: armed, threshold: threshold, opKinds: ops, lock: lock, deny: deny, own: lastOwn, foes: lastFoes, live: live, fills: fillsRecent, owner: armedOwner, engine: eng, jsArmed: jsArmed };
+      return { ready: READY, armed: armed, threshold: threshold, opKinds: ops, lock: lock, deny: deny, own: lastOwn, foes: lastFoes, live: live, fills: fillsRecent, owner: armedOwner, armedName: armedName, engine: eng, jsArmed: jsArmed };
     }
     function init() {
       /* Pin 2: guard on the factory alone. No blob check — the pasted factory
@@ -13902,7 +13906,7 @@ function applyChatResize() {
       if (!liveM) return;
       var w = r.wasm || {};
       var armed = !!w.armed;
-      var lockStr = mxArLockLabel(r) || 'None';
+      var lockStr = mxArLockLabel(r) || ((armed && w.armedName) ? String(w.armedName) : '') || 'None';
       var now = Date.now();
       if (prevArmed && !armed && prevLock !== 'None') flashUntil = now + 1200; // confirm flash
       prevArmed = armed; prevLock = lockStr;
